@@ -1,5 +1,7 @@
 # Jeopardy! for Mac
 
+> Also in this repo: **[🎤 Karaoke Maker](karaoke/)**, which turns an MP3 into a karaoke video.
+
 A single-file Jeopardy game host. Works offline.
 
 ## Quick start (no install)

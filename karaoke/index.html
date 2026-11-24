@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karaoke Maker</title>
+<style>
+  :root {
+    --bg: #f4f2f8; --card: #ffffff; --text: #1d1b26; --muted: #6c6880;
+    --line: #e2deea; --accent: #7b4dff; --accent-2: #ff4d8d; --ok: #1f9d55; --err: #d64545;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14121b; --card: #1e1b28; --text: #ece9f5; --muted: #9a95ad;
+            --line: #2f2b3d; --accent: #9b78ff; --accent-2: #ff6fa3; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+         background: var(--bg); color: var(--text); }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 16px 60px; }
+  h1 { font-size: 30px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  h1 span { background: linear-gradient(90deg, var(--accent), var(--accent-2));
+            -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; margin-bottom: 18px; }
+  #drop { border: 2px dashed var(--line); border-radius: 14px; padding: 34px 16px; text-align: center;
+          cursor: pointer; transition: .15s; }
+  #drop.over, #drop:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  #drop .big { font-size: 40px; line-height: 1; }
+  #drop .name { font-weight: 600; margin-top: 8px; word-break: break-all; }
+  label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 6px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  input[type=text], select { width: 100%; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line);
+         background: var(--bg); color: var(--text); font: inherit; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .full { grid-column: 1 / -1; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  details { margin-top: 16px; } summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 20px; cursor: pointer; }
+  .primary { width: 100%; margin-top: 20px; color: #fff; font-size: 16px;
+             background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .primary:disabled { opacity: .5; cursor: default; }
+  .secondary { background: var(--bg); color: var(--text); border: 1px solid var(--line); padding: 9px 14px; }
+  #log { font: 12px/1.6 ui-monospace, Menlo, monospace; background: var(--bg); border-radius: 10px; padding: 12px;
+         max-height: 220px; overflow: auto; white-space: pre-wrap; margin: 0; }
+  .status { display: flex; align-items: center; gap: 10px; font-weight: 600; margin-bottom: 12px; }
+  .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent);
+             animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  video { width: 100%; border-radius: 12px; background: #000; margin-top: 14px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🎤 <span>Karaoke Maker</span></h1>
+  <p class="sub">Drop in an MP3 — get a karaoke video with the vocals turned down and lyrics that light up in time.</p>
+
+  <form id="form" class="card">
+    <div id="drop">
+      <div class="big">🎵</div>
+      <div><strong>Click to choose a song</strong> or drag it here</div>
+      <div class="hint">MP3, M4A, WAV, FLAC…</div>
+      <div class="name" id="fname"></div>
+    </div>
+    <input type="file" id="audio" name="audio" accept="audio/*,.mp3,.m4a,.wav,.flac,.ogg" hidden>
+
+    <div class="grid">
+      <div>
+        <label for="artist">Artist</label>
+        <input type="text" id="artist" name="artist" placeholder="Read from the file if empty">
+      </div>
+      <div>
+        <label for="title">Song title</label>
+        <input type="text" id="title" name="title" placeholder="Read from the file if empty">
+      </div>
+      <div class="full">
+        <label for="strength">Vocal reduction: <span id="sval">85%</span></label>
+        <input type="range" id="strength" name="strength" min="0" max="100" value="85">
+        <div class="hint">Higher = quieter vocals (and slightly thinner music).</div>
+      </div>
+      <div class="full">
+        <label for="source">Lyrics</label>
+        <select id="source" name="source">
+          <option value="auto">Auto — look up synced lyrics online, otherwise transcribe</option>
+          <option value="online">Online lookup only (lrclib.net)</option>
+          <option value="whisper">Transcribe from the song (Whisper, offline)</option>
+        </select>
+      </div>
+    </div>
+
+    <details>
+      <summary>More options</summary>
+      <div class="grid">
+        <div>
+          <label for="model">Transcription quality</label>
+          <select id="model" name="model">
+            <option value="base">Fast (base)</option>
+            <option value="small" selected>Good (small)</option>
+            <option value="medium">Better (medium, slow)</option>
+            <option value="large-v3">Best (large-v3, very slow)</option>
+          </select>
+        </div>
+        <div>
+          <label for="language">Language code</label>
+          <input type="text" id="language" name="language" placeholder="auto (e.g. en, de, es)">
+        </div>
+        <div class="full">
+          <label for="lrc">Own lyrics file (.lrc)</label>
+          <input type="file" id="lrc" name="lrc" accept=".lrc,.txt">
+          <div class="hint">Optional. Every video also saves an .lrc next to it — fix timings there and upload it here to re-render.</div>
+        </div>
+      </div>
+    </details>
+
+    <button class="primary" id="go" type="submit" disabled>Make karaoke video</button>
+  </form>
+
+  <section id="job" class="card hidden">
+    <div class="status" id="status"><div class="spinner"></div><span>Working…</span></div>
+    <pre id="log"></pre>
+    <div id="result" class="hidden">
+      <video id="video" controls></video>
+      <div class="row">
+        <a id="dl" class="secondary" style="text-decoration:none;padding:9px 14px;border-radius:10px">⬇ Download</a>
+        <button class="secondary" id="reveal" type="button">Show in Finder</button>
+        <button class="secondary" id="again" type="button">Make another</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const drop = $("drop"), audio = $("audio");
+let jobId = null;
+
+drop.onclick = () => audio.click();
+["dragenter", "dragover"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", ev => {
+  if (ev.dataTransfer.files.length) { audio.files = ev.dataTransfer.files; picked(); }
+});
+audio.onchange = picked;
+function picked() {
+  const f = audio.files[0];
+  $("fname").textContent = f ? f.name : "";
+  $("go").disabled = !f;
+}
+$("strength").oninput = e => $("sval").textContent = e.target.value + "%";
+
+$("form").onsubmit = async ev => {
+  ev.preventDefault();
+  $("go").disabled = true;
+  $("job").classList.remove("hidden");
+  $("result").classList.add("hidden");
+  $("log").textContent = "Uploading…";
+  setStatus("running");
+  try {
+    const res = await fetch("/api/jobs", { method: "POST", body: new FormData($("form")) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    jobId = data.id;
+    poll();
+  } catch (e) {
+    $("log").textContent = "ERROR: " + e.message;
+    setStatus("error");
+    $("go").disabled = false;
+  }
+};
+
+async function poll() {
+  const res = await fetch(`/api/jobs/${jobId}`);
+  const data = await res.json();
+  const log = $("log");
+  log.textContent = data.log.join("\n");
+  log.scrollTop = log.scrollHeight;
+  if (data.status === "running") return setTimeout(poll, 1000);
+  setStatus(data.status);
+  $("go").disabled = false;
+  if (data.status === "done") {
+    $("video").src = `/api/jobs/${jobId}/video`;
+    $("dl").href = `/api/jobs/${jobId}/video?download=1`;
+    $("dl").download = data.filename;
+    $("result").classList.remove("hidden");
+  }
+}
+
+function setStatus(s) {
+  const map = {
+    running: '<div class="spinner"></div><span>Working… this takes a minute or two</span>',
+    done: '<span style="color:var(--ok)">✓ Your karaoke video is ready</span>',
+    error: '<span style="color:var(--err)">✗ Something went wrong — see the log</span>',
+  };
+  $("status").innerHTML = map[s];
+}
+
+$("reveal").onclick = () => fetch(`/api/jobs/${jobId}/reveal`, { method: "POST" });
+$("again").onclick = () => {
+  $("form").reset(); $("fname").textContent = ""; $("sval").textContent = "85%";
+  $("go").disabled = true; $("job").classList.add("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+</script>
+</body>
+</html>
