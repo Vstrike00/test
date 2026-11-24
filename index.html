@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jeopardy!</title>
+<style>
+  :root { --blue:#060ce9; --deep:#020a8f; --gold:#ffcc00; --ink:#fff; --bg:#000321; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:"Helvetica Neue",Helvetica,Arial,sans-serif; }
+  button { font:inherit; cursor:pointer; }
+  .btn { background:var(--blue); color:#fff; border:2px solid #fff3; border-radius:8px; padding:8px 16px; font-weight:600; }
+  .btn:hover { background:#2330ff; }
+  .btn.gold { background:var(--gold); color:#000; border-color:#0003; }
+  .btn.gold:hover { background:#ffdc4d; }
+  .btn.green { background:#1a9d3f; } .btn.red { background:#c4262e; }
+  .btn.ghost { background:transparent; }
+  .hidden { display:none !important; }
+
+  #app { display:flex; flex-direction:column; height:100%; }
+  header { display:flex; align-items:center; gap:12px; padding:10px 18px; background:#00000055; }
+  header h1 { margin:0; font-family:Georgia,serif; font-style:italic; color:var(--gold); font-size:28px; letter-spacing:2px; text-shadow:2px 2px #0008; }
+  header .sp { flex:1; }
+
+  /* Board */
+  #boardWrap { flex:1; padding:14px 18px; min-height:0; display:flex; }
+  #board { flex:1; display:grid; gap:6px; grid-template-columns:repeat(6,1fr); }
+  .cat,.tile { display:flex; align-items:center; justify-content:center; text-align:center; border-radius:4px; }
+  .cat { background:var(--blue); font-weight:800; text-transform:uppercase; padding:8px; font-size:clamp(12px,1.6vw,24px);
+    text-shadow:2px 2px #000a; border:2px solid #0006; }
+  .tile { background:var(--blue); color:var(--gold); font-family:Georgia,serif; font-weight:700; font-size:clamp(22px,4.5vw,64px);
+    text-shadow:3px 3px #000; border:2px solid #0006; transition:transform .1s, background .1s; }
+  .tile:hover:not(.used) { background:#2330ff; transform:scale(1.03); }
+  .tile.used { background:#050a55; color:transparent; text-shadow:none; cursor:default; }
+
+  /* Scores */
+  #scores { display:flex; gap:12px; padding:10px 18px 16px; justify-content:center; flex-wrap:wrap; }
+  .team { min-width:180px; flex:1; max-width:280px; background:var(--deep); border:3px solid #fff3; border-radius:8px; text-align:center; padding:8px; }
+  .team.active { border-color:var(--gold); box-shadow:0 0 14px var(--gold); }
+  .team .name { font-weight:700; cursor:pointer; text-transform:uppercase; letter-spacing:1px; }
+  .team .pts { font-family:Georgia,serif; font-size:36px; font-weight:700; }
+  .team .pts.neg { color:#ff6b6b; }
+  .team .adj button { background:#fff2; color:#fff; border:0; border-radius:4px; padding:2px 8px; margin:0 2px; }
+
+  /* Clue overlay */
+  #clue { position:fixed; inset:0; background:var(--blue); display:flex; flex-direction:column; z-index:10; }
+  #clue .top { display:flex; justify-content:space-between; padding:14px 22px; font-weight:700; color:var(--gold); text-transform:uppercase; letter-spacing:2px; }
+  #clueText { flex:1; display:flex; align-items:center; justify-content:center; text-align:center; padding:4vw;
+    font-family:Georgia,serif; font-size:clamp(26px,4.6vw,70px); line-height:1.25; text-transform:uppercase; text-shadow:3px 3px #000a; }
+  #answerText { color:var(--gold); min-height:1.4em; text-align:center; font-family:Georgia,serif; font-size:clamp(20px,3vw,44px); padding:0 4vw 14px; text-transform:uppercase; }
+  #clueActions { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; padding:14px 18px 22px; background:#0004; align-items:center; }
+  #timerBar { height:8px; background:var(--gold); width:100%; transform-origin:left; }
+  .dd { color:var(--gold); font-size:clamp(34px,7vw,100px); font-weight:900; font-style:italic; }
+
+  /* Editor */
+  #editor { position:fixed; inset:0; background:var(--bg); z-index:20; overflow:auto; padding:18px 24px 60px; }
+  #editor h2 { color:var(--gold); font-family:Georgia,serif; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:8px 0 16px; }
+  input,textarea { background:#0a1070; color:#fff; border:1px solid #fff4; border-radius:6px; padding:7px 9px; font:inherit; }
+  textarea { width:100%; resize:vertical; }
+  .catEd { background:#0a107044; border:1px solid #fff2; border-radius:8px; padding:10px; margin-bottom:14px; }
+  .catEd > input { width:100%; font-weight:700; text-transform:uppercase; margin-bottom:8px; }
+  .clueEd { display:grid; grid-template-columns:70px 1fr 1fr; gap:8px; margin-bottom:6px; align-items:start; }
+  .clueEd .v { text-align:center; color:var(--gold); font-weight:700; padding-top:8px; }
+  .clueEd textarea { height:48px; }
+  .final { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  label { font-size:13px; opacity:.85; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>JEOPARDY!</h1>
+    <span class="sp"></span>
+    <button class="btn" id="btnFinal">Final Jeopardy</button>
+    <button class="btn" id="btnEdit">Edit Board</button>
+    <button class="btn" id="btnReset">New Game</button>
+    <button class="btn ghost" id="btnFull" title="Full screen">⛶</button>
+  </header>
+  <div id="boardWrap"><div id="board"></div></div>
+  <div id="scores"></div>
+</div>
+
+<div id="clue" class="hidden">
+  <div id="timerBar"></div>
+  <div class="top"><span id="clueCat"></span><span id="clueVal"></span></div>
+  <div id="clueText"></div>
+  <div id="answerText"></div>
+  <div id="clueActions"></div>
+</div>
+
+<div id="editor" class="hidden">
+  <h2>Edit Game</h2>
+  <div class="row">
+    <label>Teams (comma-separated)</label>
+    <input id="teamsInput" size="40">
+    <label>Base value</label>
+    <input id="baseVal" type="number" value="200" step="100" min="100" style="width:90px">
+    <label>Timer (sec)</label>
+    <input id="timerSec" type="number" value="15" min="0" style="width:70px">
+    <label><input type="checkbox" id="ddOn" checked> Daily Double</label>
+  </div>
+  <div class="row">
+    <button class="btn" id="edSample">Load sample board</button>
+    <button class="btn" id="edExport">Export JSON</button>
+    <button class="btn" id="edImport">Import JSON</button>
+    <input type="file" id="importFile" accept=".json" class="hidden">
+  </div>
+  <div id="catEditors"></div>
+  <h3>Final Jeopardy</h3>
+  <div class="final">
+    <input id="fCat" placeholder="Category">
+    <textarea id="fClue" placeholder="Clue" style="height:48px"></textarea>
+    <textarea id="fAns" placeholder="Answer" style="height:48px"></textarea>
+  </div>
+  <div class="row" style="margin-top:20px">
+    <button class="btn gold" id="edSave">Save &amp; Play</button>
+    <button class="btn ghost" id="edCancel">Cancel</button>
+  </div>
+</div>
+
+<script>
+const KEY = "jeopardy-mac-v1";
+const NCAT = 6, NROW = 5;
+
+const SAMPLE = {
+  teams: ["Team 1","Team 2","Team 3"], base: 200, timer: 15, dd: true,
+  cats: [
+    {name:"Science", clues:[
+      ["This planet is known as the Red Planet","What is Mars?"],
+      ["H2O is the chemical formula for this","What is water?"],
+      ["This force keeps planets in orbit around the sun","What is gravity?"],
+      ["The powerhouse of the cell","What is the mitochondria?"],
+      ["Element with atomic number 79","What is gold?"]]},
+    {name:"World Capitals", clues:[
+      ["Capital of France","What is Paris?"],
+      ["Capital of Japan","What is Tokyo?"],
+      ["Capital of Australia (not Sydney!)","What is Canberra?"],
+      ["Capital of Brazil","What is Brasília?"],
+      ["Capital of Canada","What is Ottawa?"]]},
+    {name:"Movies", clues:[
+      ["Clownfish Nemo's dad is named this","Who is Marlin?"],
+      ["This 1997 film features Jack and Rose on a doomed ship","What is Titanic?"],
+      ["Director of Jaws and E.T.","Who is Steven Spielberg?"],
+      ["Hobbit who carries the One Ring","Who is Frodo?"],
+      ["'I'll be back' is a line from this film","What is The Terminator?"]]},
+    {name:"Food & Drink", clues:[
+      ["Italian dish of flattened dough, tomato sauce and cheese","What is pizza?"],
+      ["Japanese dish of vinegared rice and seafood","What is sushi?"],
+      ["Spice that is the world's most expensive by weight","What is saffron?"],
+      ["Fermented cabbage dish national to Korea","What is kimchi?"],
+      ["Bean used to make chocolate","What is cacao?"]]},
+    {name:"History", clues:[
+      ["First U.S. president","Who is George Washington?"],
+      ["Ancient wonder located near Cairo","What are the Pyramids of Giza?"],
+      ["Year Columbus sailed the ocean blue","What is 1492?"],
+      ["Wall that fell in 1989","What is the Berlin Wall?"],
+      ["Queen of ancient Egypt who allied with Mark Antony","Who is Cleopatra?"]]},
+    {name:"Mac Attack", clues:[
+      ["Company that makes the Mac","What is Apple?"],
+      ["Key combo to copy on a Mac","What is Command-C?"],
+      ["Mac's built-in web browser","What is Safari?"],
+      ["Mac's file manager app","What is Finder?"],
+      ["Name of Mac's menu-bar search feature","What is Spotlight?"]]}
+  ],
+  final: {cat:"Famous Firsts", clue:"In 1969 this man became the first to walk on the Moon", ans:"Who is Neil Armstrong?"}
+};
+
+let game;      // config + state
+let state;     // used tiles, scores, dd position
+let current = null, timerInt = null;
+
+const $ = id => document.getElementById(id);
+const clone = o => JSON.parse(JSON.stringify(o));
+
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify({game,state})); }catch(e){} }
+function load(){
+  try{ const s = JSON.parse(localStorage.getItem(KEY)); if(s && s.game && s.state){ game=s.game; state=s.state; return; } }catch(e){}
+  game = clone(SAMPLE); newState();
+}
+function newState(){
+  state = { used:{}, scores:game.teams.map(()=>0), active:0,
+    dd: game.dd ? [Math.floor(Math.random()*NCAT), 1+Math.floor(Math.random()*(NROW-1))] : null };
+}
+const valueOf = r => game.base * (r+1);
+
+function renderBoard(){
+  const b = $("board"); b.innerHTML = "";
+  game.cats.forEach(c => { const d=document.createElement("div"); d.className="cat"; d.textContent=c.name; b.appendChild(d); });
+  for(let r=0;r<NROW;r++) for(let c=0;c<NCAT;c++){
+    const t=document.createElement("button"); const k=c+","+r;
+    t.className="tile"+(state.used[k]?" used":"");
+    t.textContent = state.used[k] ? "" : "$"+valueOf(r);
+    if(!state.used[k]) t.onclick=()=>openClue(c,r);
+    b.appendChild(t);
+  }
+  b.style.gridTemplateRows = "auto repeat("+NROW+",1fr)";
+}
+
+function renderScores(){
+  const s=$("scores"); s.innerHTML="";
+  game.teams.forEach((n,i)=>{
+    const d=document.createElement("div"); d.className="team"+(i===state.active?" active":"");
+    d.innerHTML='<div class="name"></div><div class="pts"></div><div class="adj"><button data-d="-100">−100</button><button data-d="100">+100</button></div>';
+    d.querySelector(".name").textContent=n;
+    d.querySelector(".name").onclick=()=>{ state.active=i; save(); renderScores(); };
+    d.querySelector(".name").title="Click to make this team the active team";
+    const p=d.querySelector(".pts"); p.textContent=fmt(state.scores[i]); if(state.scores[i]<0)p.classList.add("neg");
+    d.querySelectorAll("button").forEach(b=>b.onclick=()=>{ state.scores[i]+=+b.dataset.d; save(); renderScores(); });
+    s.appendChild(d);
+  });
+}
+const fmt = n => (n<0?"-":"")+"$"+Math.abs(n).toLocaleString();
+
+/* ---------- Clue flow ---------- */
+function openClue(c,r){
+  const isDD = state.dd && state.dd[0]===c && state.dd[1]===r;
+  current = {c,r,isDD,final:false,wager:valueOf(r),revealed:false};
+  $("clueCat").textContent = game.cats[c].name;
+  if(isDD){
+    $("clueVal").textContent = "";
+    $("clueText").innerHTML = '<span class="dd">DAILY DOUBLE!</span>';
+    $("answerText").textContent = "";
+    const max = Math.max(state.scores[state.active], valueOf(NROW-1));
+    $("clueActions").innerHTML = '<label>Wager for '+esc(game.teams[state.active])+' (max $'+max+'): </label><input id="wager" type="number" min="0" max="'+max+'" value="'+valueOf(r)+'" style="width:110px"> <button class="btn gold" id="ddGo">Show clue</button>';
+    $("ddGo").onclick=()=>{ current.wager=Math.max(0,Math.min(max,+$("wager").value||0)); showClue(); };
+    $("timerBar").style.transform="scaleX(0)";
+    $("clue").classList.remove("hidden");
+  } else { $("clue").classList.remove("hidden"); showClue(); }
+}
+function showClue(){
+  const {c,r,isDD,final} = current;
+  const [q,a] = final ? [game.final.clue, game.final.ans] : game.cats[c].clues[r];
+  $("clueVal").textContent = final ? "Final Jeopardy" : isDD ? "Wager $"+current.wager : "$"+valueOf(r);
+  $("clueText").textContent = q || "(empty clue)";
+  $("answerText").textContent = "";
+  current.answer = a || "(no answer)";
+  renderClueActions();
+  startTimer();
+}
+function renderClueActions(){
+  const el=$("clueActions"); el.innerHTML="";
+  const add=(txt,cls,fn)=>{ const b=document.createElement("button"); b.className="btn "+cls; b.textContent=txt; b.onclick=fn; el.appendChild(b); };
+  if(current.final){
+    add("Reveal answer (Space)","gold",reveal);
+    game.teams.forEach((n,i)=>{
+      add("✓ "+n,"green",()=>{ const w=+prompt("Wager for "+n+"?","0")||0; state.scores[i]+=w; save(); renderScores(); });
+      add("✗ "+n,"red",()=>{ const w=+prompt("Wager for "+n+"?","0")||0; state.scores[i]-=w; save(); renderScores(); });
+    });
+    add("Close","ghost",closeClue);
+    return;
+  }
+  add("Reveal answer (Space)","gold",reveal);
+  const amt = current.isDD ? current.wager : valueOf(current.r);
+  game.teams.forEach((n,i)=>{
+    add("✓ "+n+" +"+amt,"green",()=>score(i,amt));
+    if(!current.isDD) add("✗ "+n+" −"+amt,"red",()=>score(i,-amt));
+  });
+  if(current.isDD) add("✗ Wrong −"+amt,"red",()=>score(state.active,-amt));
+  add("No one / skip","ghost",closeClue);
+}
+function score(i,amt){ state.scores[i]+=amt; if(amt>0) state.active=i; if(amt<0 && !current.isDD){ /* stay open for others */ save(); renderScores(); return; } closeClue(); }
+function reveal(){ if(!current) return; $("answerText").textContent=current.answer; stopTimer(); }
+function closeClue(){
+  stopTimer();
+  if(current && !current.final){ state.used[current.c+","+current.r]=true; }
+  current=null; $("clue").classList.add("hidden");
+  save(); renderBoard(); renderScores();
+}
+function startTimer(){
+  stopTimer();
+  const bar=$("timerBar"); const secs=game.timer||0;
+  if(!secs){ bar.style.transform="scaleX(0)"; return; }
+  const t0=Date.now();
+  timerInt=setInterval(()=>{
+    const f=1-(Date.now()-t0)/(secs*1000);
+    bar.style.transform="scaleX("+Math.max(0,f)+")";
+    if(f<=0) stopTimer();
+  },50);
+}
+function stopTimer(){ clearInterval(timerInt); timerInt=null; }
+
+/* ---------- Final Jeopardy ---------- */
+$("btnFinal").onclick=()=>{
+  current={final:true};
+  $("clueCat").textContent="Final Jeopardy: "+(game.final.cat||"");
+  $("clueVal").textContent="";
+  $("clueText").innerHTML='<span class="dd">FINAL JEOPARDY</span>';
+  $("answerText").textContent="";
+  $("clueActions").innerHTML='<button class="btn gold" id="fShow">Show category &amp; clue</button> <button class="btn ghost" id="fClose">Close</button>';
+  $("timerBar").style.transform="scaleX(0)";
+  $("clue").classList.remove("hidden");
+  $("fShow").onclick=()=>{ current.final=true; showFinal(); };
+  $("fClose").onclick=closeClue;
+};
+function showFinal(){ $("clueVal").textContent="Final Jeopardy"; $("clueText").textContent=game.final.clue||"(empty clue)"; current.answer=game.final.ans||""; $("timerBar").style.transform="scaleX(1)"; renderClueActions(); startTimer(); }
+
+/* ---------- Editor ---------- */
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function openEditor(){
+  $("teamsInput").value=game.teams.join(", "); $("baseVal").value=game.base; $("timerSec").value=game.timer; $("ddOn").checked=!!game.dd;
+  const ce=$("catEditors"); ce.innerHTML="";
+  game.cats.forEach((c,ci)=>{
+    const d=document.createElement("div"); d.className="catEd";
+    let h='<input data-cat="'+ci+'" placeholder="Category '+(ci+1)+'" value="'+esc(c.name)+'">';
+    for(let r=0;r<NROW;r++){
+      const [q,a]=c.clues[r]||["",""];
+      h+='<div class="clueEd"><div class="v">Row '+(r+1)+'</div><textarea data-q="'+ci+','+r+'" placeholder="Clue">'+esc(q)+'</textarea><textarea data-a="'+ci+','+r+'" placeholder="Answer (e.g. What is…?)">'+esc(a)+'</textarea></div>';
+    }
+    d.innerHTML=h; ce.appendChild(d);
+  });
+  $("fCat").value=game.final.cat; $("fClue").value=game.final.clue; $("fAns").value=game.final.ans;
+  $("editor").classList.remove("hidden");
+}
+function readEditor(){
+  const g={ teams:$("teamsInput").value.split(",").map(s=>s.trim()).filter(Boolean).slice(0,6), base:Math.max(1,+$("baseVal").value||200),
+    timer:Math.max(0,+$("timerSec").value||0), dd:$("ddOn").checked, cats:[], final:{cat:$("fCat").value,clue:$("fClue").value,ans:$("fAns").value} };
+  if(!g.teams.length) g.teams=["Team 1"];
+  for(let c=0;c<NCAT;c++){
+    const cat={name:document.querySelector('[data-cat="'+c+'"]').value, clues:[]};
+    for(let r=0;r<NROW;r++) cat.clues.push([document.querySelector('[data-q="'+c+','+r+'"]').value, document.querySelector('[data-a="'+c+','+r+'"]').value]);
+    g.cats.push(cat);
+  }
+  return g;
+}
+$("btnEdit").onclick=openEditor;
+$("edCancel").onclick=()=>$("editor").classList.add("hidden");
+$("edSave").onclick=()=>{ game=readEditor(); newState(); save(); $("editor").classList.add("hidden"); renderBoard(); renderScores(); };
+$("edSample").onclick=()=>{ if(confirm("Replace everything in the editor with the sample board?")){ game=clone(SAMPLE); openEditor(); } };
+$("edExport").onclick=()=>{
+  const blob=new Blob([JSON.stringify(readEditor(),null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="jeopardy-game.json"; a.click();
+};
+$("edImport").onclick=()=>$("importFile").click();
+$("importFile").onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const rd=new FileReader(); rd.onload=()=>{ try{ const g=JSON.parse(rd.result); if(!g.cats||!g.teams) throw 0; game=g; openEditor(); }catch(_){ alert("That doesn't look like a Jeopardy game file."); } };
+  rd.readAsText(f); e.target.value="";
+};
+
+/* ---------- Misc ---------- */
+$("btnReset").onclick=()=>{ if(confirm("Start a new game? Scores and used clues reset (board content is kept).")){ newState(); save(); renderBoard(); renderScores(); } };
+$("btnFull").onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); };
+document.addEventListener("keydown",e=>{
+  if(!current || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  if(e.code==="Space"){ e.preventDefault(); reveal(); }
+  if(e.key==="Escape") closeClue();
+});
+
+load(); renderBoard(); renderScores();
+</script>
+</body>
+</html>
