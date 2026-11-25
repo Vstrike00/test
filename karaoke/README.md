@@ -8,9 +8,10 @@ Drop in an MP3 and get a karaoke video (`.mp4`) with:
 
 ## Start it
 
-1. Double-click **`Start Karaoke Maker.command`**.
-   - The first time, macOS may say it can't verify the file. Right-click it, choose **Open**, then **Open** again.
-   - If it won't run at all, open Terminal and run: `bash "path/to/Start Karaoke Maker.command"`
+1. Open **Terminal** (press ⌘ Space, type `Terminal`, press Enter). Type `bash ` with a space after it, drag **`Start Karaoke Maker.command`** into the Terminal window, then press **Enter**.
+   - This works even when macOS won't let you double-click the file.
+   - To make double-clicking work from then on, run this once in Terminal (again, drag the file in where the path goes):
+     `xattr -c "path/to/Start Karaoke Maker.command"; chmod +x "path/to/Start Karaoke Maker.command"`
 2. The first start installs what it needs. This takes a few minutes and only happens once:
    - `ffmpeg` through [Homebrew](https://brew.sh). Install Homebrew first if you don't have it.
    - A Python environment in `.venv/`.
