@@ -17,6 +17,7 @@ from flask import Flask, abort, jsonify, request, send_file
 from karaoke_core import make_karaoke
 
 HERE = Path(__file__).resolve().parent
+VERSION = "1.3 (draws lyrics without libass)"
 PORT = int(os.environ.get("KARAOKE_PORT", "5123"))
 
 
@@ -114,7 +115,7 @@ def reveal(job_id):
 
 if __name__ == "__main__":
     url = f"http://127.0.0.1:{PORT}"
-    print(f"Karaoke Maker running at {url}  (videos are saved to {OUT_DIR})")
+    print(f"Karaoke Maker {VERSION} running at {url}  (videos are saved to {OUT_DIR})")
     print("Close this window or press Ctrl+C to quit.")
     if "--no-browser" not in sys.argv:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
