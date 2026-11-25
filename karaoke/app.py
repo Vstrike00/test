@@ -17,7 +17,7 @@ from flask import Flask, abort, jsonify, request, send_file
 from karaoke_core import make_karaoke
 
 HERE = Path(__file__).resolve().parent
-VERSION = "1.3 (draws lyrics without libass)"
+VERSION = "1.4 (precise word timing)"
 PORT = int(os.environ.get("KARAOKE_PORT", "5123"))
 
 
@@ -83,10 +83,19 @@ def create_job():
         lrc_text=lrc_text,
         whisper_model=request.form.get("model", "small"),
         language=request.form.get("language", "").strip() or None,
+        precise=request.form.get("precise") == "1",
+        offset=_float(request.form.get("offset"), 0.0),
     )
     jobs[job_id] = {"status": "running", "log": [], "output": None}
     threading.Thread(target=run_job, args=(job_id, mp3, opts), daemon=True).start()
     return jsonify(id=job_id)
+
+
+def _float(v, default):
+    try:
+        return max(-5.0, min(5.0, float(v)))
+    except (TypeError, ValueError):
+        return default
 
 
 @app.get("/api/jobs/<job_id>")

@@ -88,6 +88,17 @@
           <option value="whisper">Transcribe from the song (Whisper, offline)</option>
         </select>
       </div>
+      <div class="full">
+        <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:500">
+          <input type="checkbox" name="precise" value="1" checked> Precise word timing
+        </label>
+        <div class="hint">Listens to the song and lines up each word of the online lyrics with when it's sung. Adds about a minute the first time; repeat renders of the same song are quick.</div>
+      </div>
+      <div class="full">
+        <label for="offset">Timing nudge: <span id="oval">0.00 s</span></label>
+        <input type="range" id="offset" name="offset" min="-1.5" max="1.5" step="0.05" value="0">
+        <div class="hint">Words lighting up too late? Move left. Too early? Move right.</div>
+      </div>
     </div>
 
     <details>
@@ -149,6 +160,8 @@ function picked() {
   $("go").disabled = !f;
 }
 $("strength").oninput = e => $("sval").textContent = e.target.value + "%";
+const showOffset = () => { const v = +$("offset").value; $("oval").textContent = (v > 0 ? "+" : "") + v.toFixed(2) + " s"; };
+$("offset").oninput = showOffset;
 
 $("form").onsubmit = async ev => {
   ev.preventDefault();
@@ -198,7 +211,7 @@ function setStatus(s) {
 
 $("reveal").onclick = () => fetch(`/api/jobs/${jobId}/reveal`, { method: "POST" });
 $("again").onclick = () => {
-  $("form").reset(); $("fname").textContent = ""; $("sval").textContent = "85%";
+  $("form").reset(); $("fname").textContent = ""; $("sval").textContent = "85%"; showOffset();
   $("go").disabled = true; $("job").classList.add("hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 };

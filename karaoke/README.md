@@ -28,7 +28,12 @@ In **Auto** mode it tries these in order:
 2. **lrclib.net**: a free database of time-synced lyrics. It searches by artist and title, which are read from the MP3 tags or from a file named `Artist - Title.mp3`. If the tags are missing, type them into the form.
 3. **Whisper transcription**: if the song isn't found online, the lyrics are worked out from the audio itself, on your Mac and offline. The first time, it downloads a speech model (~500 MB for "small"). Expect a few minutes per song. Fast songs and heavy mixes can come out with some wrong words.
 
-Each video also saves a matching `.lrc` file next to it. To fix a wrong word or timing, edit that file in TextEdit, upload it under **More options → Own lyrics file**, and render again.
+### Precise word timing (on by default)
+Online lyrics only say when each *line* starts. With **Precise word timing** checked, Whisper also listens to the song, and every lyric word is matched to the moment it's actually sung. If the online lyrics were timed for a different edit of the song (say, a longer intro), it also notices that and shifts all the lyrics to match. Whisper's results are saved per song in `~/.cache/karaoke-maker`, so rendering the same song again is quick.
+
+If everything is a little early or late, use the **Timing nudge** slider and render again.
+
+Each video also saves a matching `.lrc` file next to it, with a time for every word. To fix a wrong word or timing, edit that file in TextEdit, upload it under **More options → Own lyrics file**, and render again.
 
 ## Notes
 

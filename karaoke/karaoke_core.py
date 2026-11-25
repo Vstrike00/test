@@ -13,6 +13,7 @@ Steps
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -44,6 +45,7 @@ class Line:
     start: float
     end: float
     words: list[Word] = field(default_factory=list)
+    word_timed: bool = False  # True when word times are real, not estimated
 
     @property
     def text(self) -> str:
@@ -170,7 +172,8 @@ def parse_lrc(text: str, duration: float) -> list[Line]:
                     words.append(Word(part, ws, we))
             words = [w for w in words if w.text]
             if words:
-                lines.append(Line(words[0].start, min(nxt, words[-1].end), words))
+                lines.append(Line(words[0].start, min(nxt, words[-1].end), words,
+                                  word_timed=True))
             continue
 
         tokens = lyric.split()
@@ -235,8 +238,28 @@ def fetch_lrclib(artist: str, title: str, duration: float, log: Log) -> Optional
     return None
 
 
-def transcribe(mp3: Path, model_name: str, language: Optional[str],
-               log: Log) -> list[Line]:
+def whisper_cache_path(mp3: Path, model_name: str, language: Optional[str]) -> Path:
+    h = hashlib.sha1()
+    with open(mp3, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    root = Path.home() / ".cache" / "karaoke-maker"
+    return root / f"{h.hexdigest()[:16]}-{model_name}-{language or 'auto'}.json"
+
+
+def run_whisper(mp3: Path, model_name: str, language: Optional[str],
+                log: Log) -> list[list[Word]]:
+    """Transcribe with word timestamps. Returns Whisper's segments as word lists.
+    Results are cached per song, so re-rendering (e.g. with a different
+    offset) is quick."""
+    cache = whisper_cache_path(mp3, model_name, language)
+    if cache.exists():
+        try:
+            data = json.loads(cache.read_text())
+            log("Using saved Whisper timing for this song.")
+            return [[Word(*w) for w in seg] for seg in data]
+        except Exception:
+            pass
     try:
         from faster_whisper import WhisperModel
     except ImportError:
@@ -244,19 +267,34 @@ def transcribe(mp3: Path, model_name: str, language: Optional[str],
             "Whisper (automatic transcription) is not installed. Run:  "
             ".venv/bin/pip install faster-whisper  - or upload an .lrc file."
         )
-    log(f"Transcribing lyrics with Whisper ({model_name}). The first run downloads "
-        "the model; this can take a few minutes...")
+    log(f"Listening to the vocals with Whisper ({model_name}). The first run "
+        "downloads the model; this can take a few minutes...")
     model = WhisperModel(model_name, device="auto", compute_type="auto")
     segments, info = model.transcribe(
         str(mp3), word_timestamps=True, language=language or None,
         vad_filter=False, condition_on_previous_text=False, beam_size=5,
     )
     log(f"Detected language: {info.language}")
-    lines: list[Line] = []
+    out: list[list[Word]] = []
     for seg in segments:
         words = [Word(w.word.strip(), w.start, w.end)
                  for w in (seg.words or []) if w.word.strip()]
-        # Whisper segments can be long; break them into singable lines.
+        if words:
+            out.append(words)
+            log(f"  [{fmt_time(words[0].start)}] " + " ".join(w.text for w in words))
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps([[(w.text, w.start, w.end) for w in seg]
+                                     for seg in out]))
+    except OSError:
+        pass
+    return out
+
+
+def segments_to_lines(segments: list[list[Word]]) -> list[Line]:
+    """Break Whisper segments into singable lines."""
+    lines: list[Line] = []
+    for words in segments:
         chunk: list[Word] = []
         for w in words:
             gap = w.start - chunk[-1].end if chunk else 0
@@ -266,8 +304,6 @@ def transcribe(mp3: Path, model_name: str, language: Optional[str],
             chunk.append(w)
         if chunk:
             lines.append(Line(chunk[0].start, chunk[-1].end, chunk))
-        if lines:
-            log(f"  [{fmt_time(lines[-1].start)}] {lines[-1].text}")
     return lines
 
 
@@ -292,7 +328,8 @@ def ass_escape(s: str) -> str:
     return s.replace("\\", "/").replace("{", "(").replace("}", ")")
 
 
-LEAD = 3.0  # seconds a line is shown before it is sung
+LEAD = 3.0         # seconds a line is shown before it is sung
+ANTICIPATE = 0.08  # highlight words this much before they are sung
 
 
 @dataclass
@@ -662,6 +699,8 @@ def make_karaoke(
     lrc_text: Optional[str] = None,
     whisper_model: str = "small",
     language: Optional[str] = None,
+    precise: bool = True,                 # snap LRC words to the singing (Whisper)
+    offset: float = 0.0,                  # manual nudge, + = lyrics later
 ) -> Path:
     check_ffmpeg()
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -699,7 +738,20 @@ def make_karaoke(
         else:
             log("No synced lyrics online - falling back to transcription.")
     if not lines and lyrics_source in ("auto", "whisper"):
-        lines = transcribe(mp3, whisper_model, language, log)
+        lines = segments_to_lines(run_whisper(mp3, whisper_model, language, log))
+    elif lines and precise and not has_word_timing(lines):
+        try:
+            from align import align_lines
+            heard = [w for seg in run_whisper(mp3, whisper_model, language, log)
+                     for w in seg]
+            log("Syncing every word to the singing...")
+            lines = align_lines(lines, heard, log)
+        except Exception as e:  # never lose the video over this
+            log(f"Precise timing skipped ({e}). Using line timing only.")
+    if lines and offset:
+        from align import shift_lines
+        lines = shift_lines(lines, offset)
+        log(f"Shifted lyrics by {offset:+.2f}s.")
     if not lines:
         log("Warning: no lyrics found - the video will have music only.")
 
@@ -708,7 +760,9 @@ def make_karaoke(
     make_backing_track(mp3, backing, strength, info["channels"] >= 2, log)
 
     # Lyrics overlay + video
-    events = layout(lines, artist, title, duration)
+    # Light each word up a hair early - it feels in time when you're singing along.
+    from align import shift_lines
+    events = layout(shift_lines(lines, -ANTICIPATE), artist, title, duration)
     safe = re.sub(r"[^\w\- ]+", "", f"{artist} - {title}" if artist else title)
     safe = re.sub(r"\s+", " ", safe).strip() or "karaoke"
     out = out_dir / f"{safe} (Karaoke).mp4"
@@ -719,14 +773,21 @@ def make_karaoke(
     return out
 
 
+def has_word_timing(lines: list[Line]) -> bool:
+    return any(getattr(l, "word_timed", False) for l in lines)
+
+
 def to_lrc(lines: list[Line]) -> str:
-    def stamp(t):
-        m, s = divmod(max(0.0, t), 60)
-        return f"[{int(m):02d}:{s:05.2f}]"
+    """Enhanced LRC: line times plus <mm:ss.xx> before every word, so the
+    precise timing survives when the file is edited and uploaded again."""
+    def t(x):
+        m, s = divmod(max(0.0, x), 60)
+        return f"{int(m):02d}:{s:05.2f}"
     rows = []
     for i, l in enumerate(lines):
-        rows.append(stamp(l.start) + l.text)
+        words = " ".join(f"<{t(w.start)}>{w.text}" for w in l.words)
+        rows.append(f"[{t(l.start)}]{words} <{t(l.end)}>")
         nxt = lines[i + 1].start if i + 1 < len(lines) else None
         if nxt is None or nxt - l.end > 3:
-            rows.append(stamp(l.end))
+            rows.append(f"[{t(l.end)}]")
     return "\n".join(rows) + "\n"
