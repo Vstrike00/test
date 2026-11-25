@@ -760,9 +760,12 @@ def make_karaoke(
             if lang and not language:
                 log(f"Lyrics look like language '{lang}' - telling Whisper.")
             hints = lyric_hints(lines)
+            model = whisper_model
+            if lang == "en" and model in ("tiny", "base", "small", "medium"):
+                model += ".en"  # English-only models hear English more accurately
 
             def attempt(audio: Path) -> tuple[list[Line], float]:
-                heard = [w for seg in run_whisper(audio, whisper_model, lang, log,
+                heard = [w for seg in run_whisper(audio, model, lang, log,
                                                   hints=hints) for w in seg]
                 log("Syncing every word to the singing...")
                 st: dict = {}
