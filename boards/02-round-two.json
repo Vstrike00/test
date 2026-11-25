@@ -1,0 +1,167 @@
+{
+  "teams": [
+    "Team 1",
+    "Team 2",
+    "Team 3"
+  ],
+  "base": 400,
+  "timer": 15,
+  "dd": true,
+  "cats": [
+    {
+      "name": "Animals",
+      "clues": [
+        [
+          "Largest animal on Earth",
+          "What is the blue whale?"
+        ],
+        [
+          "Only mammal that can truly fly",
+          "What is the bat?"
+        ],
+        [
+          "A group of lions is called this",
+          "What is a pride?"
+        ],
+        [
+          "Bird that cannot fly and lives in Antarctica",
+          "What is a penguin?"
+        ],
+        [
+          "Fastest land animal",
+          "What is the cheetah?"
+        ]
+      ]
+    },
+    {
+      "name": "Sports",
+      "clues": [
+        [
+          "Number of players on a soccer team on the field",
+          "What is 11?"
+        ],
+        [
+          "Sport played at Wimbledon",
+          "What is tennis?"
+        ],
+        [
+          "Country that hosted the 2016 Summer Olympics",
+          "What is Brazil?"
+        ],
+        [
+          "Michael Jordan played this sport",
+          "What is basketball?"
+        ],
+        [
+          "Term for three strikes in a row in bowling",
+          "What is a turkey?"
+        ]
+      ]
+    },
+    {
+      "name": "Music",
+      "clues": [
+        [
+          "Band with Paul, John, George and Ringo",
+          "Who are The Beatles?"
+        ],
+        [
+          "The 'King of Pop'",
+          "Who is Michael Jackson?"
+        ],
+        [
+          "Instrument with 88 keys",
+          "What is the piano?"
+        ],
+        [
+          "Six-stringed instrument often strummed around a campfire",
+          "What is the guitar?"
+        ],
+        [
+          "Singer of 'Shake It Off'",
+          "Who is Taylor Swift?"
+        ]
+      ]
+    },
+    {
+      "name": "Geography",
+      "clues": [
+        [
+          "Longest river in Africa",
+          "What is the Nile?"
+        ],
+        [
+          "Largest ocean",
+          "What is the Pacific?"
+        ],
+        [
+          "Country shaped like a boot",
+          "What is Italy?"
+        ],
+        [
+          "Tallest mountain on Earth",
+          "What is Mount Everest?"
+        ],
+        [
+          "Continent with the most countries",
+          "What is Africa?"
+        ]
+      ]
+    },
+    {
+      "name": "Tech",
+      "clues": [
+        [
+          "Search engine whose name became a verb",
+          "What is Google?"
+        ],
+        [
+          "'www' stands for this",
+          "What is World Wide Web?"
+        ],
+        [
+          "Apple's voice assistant",
+          "Who is Siri?"
+        ],
+        [
+          "Smallest unit of digital data",
+          "What is a bit?"
+        ],
+        [
+          "Co-founder of Apple who introduced the iPhone",
+          "Who is Steve Jobs?"
+        ]
+      ]
+    },
+    {
+      "name": "Party Time",
+      "clues": [
+        [
+          "You blow these out on a birthday cake",
+          "What are candles?"
+        ],
+        [
+          "Game where you pin the tail on this animal",
+          "What is a donkey?"
+        ],
+        [
+          "Popular party game with a swinging, candy-filled figure",
+          "What is a piñata?"
+        ],
+        [
+          "'Feliz cumpleaños' is Spanish for this",
+          "What is Happy Birthday?"
+        ],
+        [
+          "Sweet, creamy topping spread on a cake",
+          "What is frosting (icing)?"
+        ]
+      ]
+    }
+  ],
+  "final": {
+    "cat": "Famous Firsts",
+    "clue": "This 1903 invention by two brothers from Ohio made the first powered flight",
+    "ans": "What is the airplane (Wright Flyer)?"
+  }
+}

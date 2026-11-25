@@ -34,7 +34,7 @@
   .btn.ghost { background:transparent; box-shadow:inset 0 0 0 2px #ffffff40; }
 
   #app { display:flex; flex-direction:column; height:100%; }
-  header { display:flex; align-items:center; gap:10px; padding:14px 22px 6px; }
+  header { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:14px 22px 6px; }
   header h1 { margin:0; font-family:var(--display); font-weight:700; font-size:34px; letter-spacing:1px;
     background:linear-gradient(90deg,var(--c2),var(--c1),var(--c6),var(--c5),var(--c4));
     -webkit-background-clip:text; background-clip:text; color:transparent; }
@@ -101,6 +101,23 @@
   body.display #board:empty::after { content:"Waiting for host…"; font-size:32px; opacity:.6; grid-column:1/-1; align-self:center; text-align:center; font-family:var(--display); }
   #fsHint { position:fixed; bottom:10px; right:14px; opacity:.5; font-size:13px; z-index:30; background:#0004; padding:4px 12px; border-radius:999px; }
 
+  /* Board library */
+  #drawer { position:fixed; top:0; right:0; bottom:0; width:min(380px,92vw); z-index:15; padding:20px;
+    background:linear-gradient(170deg,#2a1b6eee,#1b1646ee); backdrop-filter:blur(14px); box-shadow:-10px 0 40px #0006;
+    display:flex; flex-direction:column; gap:12px; animation:slide .2s ease-out; }
+  @keyframes slide { from { transform:translateX(40px); opacity:0; } to { transform:none; opacity:1; } }
+  #drawer h2 { margin:0; font-family:var(--display); font-weight:600; }
+  #drawer .hint { font-size:13px; opacity:.75; margin:0; }
+  #boardList { flex:1; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+  .bItem { display:flex; align-items:center; gap:12px; text-align:left; background:#ffffff1c; color:#fff; border:0; border-radius:16px;
+    padding:10px 14px; font-weight:800; transition:transform .12s, background .12s; }
+  .bItem:hover { background:#ffffff33; transform:translateX(-3px); }
+  .bItem .n { flex:none; width:30px; height:30px; border-radius:50%; display:grid; place-items:center; background:#ffffff26; font-family:var(--display); }
+  .bItem small { display:block; opacity:.7; font-weight:600; }
+  .bItem.cur { background:linear-gradient(135deg,#ffd23f,#ff9f1c); color:var(--dark); }
+  .bItem.cur .n { background:#0000001f; }
+  body.display #drawer { display:none !important; }
+
   /* Editor */
   #editor { position:fixed; inset:0; z-index:20; overflow:auto; padding:22px 28px 60px;
     background:linear-gradient(160deg,var(--bg1),var(--bg2)); }
@@ -125,6 +142,9 @@
     <h1>🎉 Huy's Birthday Bash 🎈</h1>
     <span class="sp"></span>
     <button class="btn gold" id="btnTV" title="Open the audience view in a second window for your TV">📺 TV Display</button>
+    <button class="btn" id="btnPrev" title="Previous board">◀</button>
+    <button class="btn" id="btnNext" title="Next board (N)">Next board ▶</button>
+    <button class="btn" id="btnLib">📁 Boards</button>
     <button class="btn" id="btnFinal">Final Jeopardy</button>
     <button class="btn" id="btnEdit">Edit Board</button>
     <button class="btn" id="btnReset">New Game</button>
@@ -141,6 +161,15 @@
   <div id="answerText"></div>
   <div id="hostAnswer"></div>
   <div id="clueActions"></div>
+</div>
+
+<div id="drawer" class="hidden">
+  <div class="row" style="margin:0"><h2 style="flex:1">Boards</h2><button class="btn ghost" id="libClose">✕</button></div>
+  <button class="btn gold" id="libPick">📁 Choose boards folder…</button>
+  <input type="file" id="libFolder" webkitdirectory multiple class="hidden">
+  <p class="hint" id="libHint"></p>
+  <div id="boardList"></div>
+  <p class="hint">Put each board in the folder as a <b>.json</b> file (use Edit Board → Export JSON). Boards play in filename order, so name them 01-…, 02-…. Switching boards keeps team scores and resets the tiles.</p>
 </div>
 
 <div id="editor" class="hidden">
@@ -432,10 +461,68 @@ $("importFile").onchange=e=>{
   rd.readAsText(f); e.target.value="";
 };
 
+/* ---------- Board library (folder of .json boards) ---------- */
+const LIBKEY = "jeopardy-lib-v1";
+let lib = { boards:[], index:-1 };
+function saveLib(){ try{ localStorage.setItem(LIBKEY, JSON.stringify(lib)); }catch(e){} }
+function loadLib(){ try{ const l=JSON.parse(localStorage.getItem(LIBKEY)); if(l && Array.isArray(l.boards)) lib=l; }catch(e){} }
+function normalizeBoard(g){
+  const out = { teams: Array.isArray(g.teams)&&g.teams.length ? g.teams : ["Team 1"], base: +g.base>0 ? +g.base : 200,
+    timer: g.timer==null ? 15 : +g.timer, dd: g.dd!==false, cats:[], final: Object.assign({cat:"",clue:"",ans:""}, g.final||{}) };
+  for(let c=0;c<NCAT;c++){
+    const src=(g.cats&&g.cats[c])||{name:"",clues:[]}; const clues=[];
+    for(let r=0;r<NROW;r++) clues.push((src.clues&&src.clues[r])||["",""]);
+    out.cats.push({name:src.name||"",clues});
+  }
+  return out;
+}
+function playBoard(i){
+  const b=lib.boards[i]; if(!b) return;
+  const teams=game.teams, scores=state.scores, active=state.active;
+  game=normalizeBoard(clone(b.game)); game.teams=teams;
+  state={ used:{}, scores, active, dd: game.dd ? [Math.floor(Math.random()*NCAT), 1+Math.floor(Math.random()*(NROW-1))] : null };
+  lib.index=i; saveLib(); save(); renderBoard(); renderScores(); renderLib();
+}
+function renderLib(){
+  const list=$("boardList"); list.innerHTML="";
+  lib.boards.forEach((b,i)=>{
+    const el=document.createElement("button"); el.className="bItem"+(i===lib.index?" cur":"");
+    el.innerHTML='<span class="n">'+(i+1)+'</span><span><span class="t"></span><small></small></span>';
+    el.querySelector(".t").textContent=b.name;
+    el.querySelector("small").textContent=b.game.cats.map(c=>c.name).filter(Boolean).join(" · ");
+    el.onclick=()=>{ playBoard(i); };
+    list.appendChild(el);
+  });
+  $("libHint").textContent = lib.boards.length ? lib.boards.length+" boards loaded. Click one to play it." : "No folder loaded yet.";
+  $("btnNext").classList.toggle("hidden", !(lib.index>=0 && lib.index<lib.boards.length-1));
+  $("btnPrev").classList.toggle("hidden", !(lib.index>0));
+}
+$("btnLib").onclick=()=>$("drawer").classList.toggle("hidden");
+$("libClose").onclick=()=>$("drawer").classList.add("hidden");
+$("libPick").onclick=()=>$("libFolder").click();
+$("libFolder").onchange=async e=>{
+  const files=[...e.target.files].filter(f=>/\.json$/i.test(f.name) && !f.name.startsWith("."))
+    .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+  const boards=[]; let skipped=0;
+  for(const f of files){
+    try{ const g=JSON.parse(await f.text()); if(!g||!Array.isArray(g.cats)) throw 0;
+      boards.push({name:f.name.replace(/\.json$/i,"").replace(/^\d+[-_ ]*/,"").replace(/[-_]+/g," ")||f.name, file:f.name, game:normalizeBoard(g)}); }
+    catch(_){ skipped++; }
+  }
+  e.target.value="";
+  if(!boards.length){ alert("No Jeopardy board .json files found in that folder."); return; }
+  const cur=lib.boards[lib.index], keep=cur ? boards.findIndex(b=>b.file===cur.file) : -1;
+  lib={boards, index:keep}; saveLib(); renderLib();
+  if(skipped) alert(skipped+" file(s) were skipped because they aren't board files.");
+};
+$("btnNext").onclick=()=>playBoard(lib.index+1);
+$("btnPrev").onclick=()=>playBoard(lib.index-1);
+
 /* ---------- Misc ---------- */
 $("btnReset").onclick=()=>{ if(confirm("Start a new game? Scores and used clues reset (board content is kept).")){ newState(); save(); renderBoard(); renderScores(); } };
 $("btnFull").onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); };
 document.addEventListener("keydown",e=>{
+  if(!current && !/INPUT|TEXTAREA/.test(document.activeElement.tagName) && (e.key==="n"||e.key==="N") && lib.index>=0 && lib.index<lib.boards.length-1) playBoard(lib.index+1);
   if(!current || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
   if(e.code==="Space"){ e.preventDefault(); reveal(); }
   if(e.key==="Escape") closeClue();
@@ -449,7 +536,7 @@ if(DISPLAY){
   document.addEventListener("fullscreenchange",()=>h.classList.toggle("hidden",!!document.fullscreenElement));
   game={cats:[],teams:[],base:200,timer:0,final:{}}; state={used:{},scores:[],active:0,dd:null};
   if(window.opener) window.opener.postMessage({jeoReady:1},"*");
-} else { load(); renderBoard(); renderScores(); }
+} else { load(); loadLib(); renderBoard(); renderScores(); renderLib(); }
 </script>
 </body>
 </html>

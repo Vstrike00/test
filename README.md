@@ -23,6 +23,13 @@ npm run build    # produces a .dmg in dist/
 
 The TV shows only the board, scores, the clue, and the answer once you reveal it. You keep the controls, and the answer is shown to you (host only) on your screen.
 
+## Board folder (play several boards in a row)
+1. Put your boards in a folder as `.json` files (build one in **Edit Board → Export JSON**). Name them in play order: `01-round-one.json`, `02-round-two.json`, …  Two examples are in `boards/`.
+2. Click **📁 Boards → Choose boards folder…** and pick the folder. All boards are listed; click one to play it.
+3. Use **Next board ▶** (or press **N**) to jump to the next one. Team scores carry over; the tiles reset.
+
+The list is remembered, so you only pick the folder again if you add or change files.
+
 ## How to play
 - Click a tile to reveal the clue; **Space** reveals the answer, **Esc** closes it.
 - Use ✓ / ✗ buttons to award or deduct points. Click a team name to set the active team.

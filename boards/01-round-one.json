@@ -1,0 +1,167 @@
+{
+  "teams": [
+    "Team 1",
+    "Team 2",
+    "Team 3"
+  ],
+  "base": 200,
+  "timer": 15,
+  "dd": true,
+  "cats": [
+    {
+      "name": "Science",
+      "clues": [
+        [
+          "This planet is known as the Red Planet",
+          "What is Mars?"
+        ],
+        [
+          "H2O is the chemical formula for this",
+          "What is water?"
+        ],
+        [
+          "This force keeps planets in orbit around the sun",
+          "What is gravity?"
+        ],
+        [
+          "The powerhouse of the cell",
+          "What is the mitochondria?"
+        ],
+        [
+          "Element with atomic number 79",
+          "What is gold?"
+        ]
+      ]
+    },
+    {
+      "name": "World Capitals",
+      "clues": [
+        [
+          "Capital of France",
+          "What is Paris?"
+        ],
+        [
+          "Capital of Japan",
+          "What is Tokyo?"
+        ],
+        [
+          "Capital of Australia (not Sydney!)",
+          "What is Canberra?"
+        ],
+        [
+          "Capital of Brazil",
+          "What is Brasília?"
+        ],
+        [
+          "Capital of Canada",
+          "What is Ottawa?"
+        ]
+      ]
+    },
+    {
+      "name": "Movies",
+      "clues": [
+        [
+          "Clownfish Nemo's dad is named this",
+          "Who is Marlin?"
+        ],
+        [
+          "This 1997 film features Jack and Rose on a doomed ship",
+          "What is Titanic?"
+        ],
+        [
+          "Director of Jaws and E.T.",
+          "Who is Steven Spielberg?"
+        ],
+        [
+          "Hobbit who carries the One Ring",
+          "Who is Frodo?"
+        ],
+        [
+          "'I'll be back' is a line from this film",
+          "What is The Terminator?"
+        ]
+      ]
+    },
+    {
+      "name": "Food & Drink",
+      "clues": [
+        [
+          "Italian dish of flattened dough, tomato sauce and cheese",
+          "What is pizza?"
+        ],
+        [
+          "Japanese dish of vinegared rice and seafood",
+          "What is sushi?"
+        ],
+        [
+          "Spice that is the world's most expensive by weight",
+          "What is saffron?"
+        ],
+        [
+          "Fermented cabbage dish national to Korea",
+          "What is kimchi?"
+        ],
+        [
+          "Bean used to make chocolate",
+          "What is cacao?"
+        ]
+      ]
+    },
+    {
+      "name": "History",
+      "clues": [
+        [
+          "First U.S. president",
+          "Who is George Washington?"
+        ],
+        [
+          "Ancient wonder located near Cairo",
+          "What are the Pyramids of Giza?"
+        ],
+        [
+          "Year Columbus sailed the ocean blue",
+          "What is 1492?"
+        ],
+        [
+          "Wall that fell in 1989",
+          "What is the Berlin Wall?"
+        ],
+        [
+          "Queen of ancient Egypt who allied with Mark Antony",
+          "Who is Cleopatra?"
+        ]
+      ]
+    },
+    {
+      "name": "Mac Attack",
+      "clues": [
+        [
+          "Company that makes the Mac",
+          "What is Apple?"
+        ],
+        [
+          "Key combo to copy on a Mac",
+          "What is Command-C?"
+        ],
+        [
+          "Mac's built-in web browser",
+          "What is Safari?"
+        ],
+        [
+          "Mac's file manager app",
+          "What is Finder?"
+        ],
+        [
+          "Name of Mac's menu-bar search feature",
+          "What is Spotlight?"
+        ]
+      ]
+    }
+  ],
+  "final": {
+    "cat": "Famous Firsts",
+    "clue": "In 1969 this man became the first to walk on the Moon",
+    "ans": "Who is Neil Armstrong?"
+  }
+}
