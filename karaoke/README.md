@@ -32,6 +32,8 @@ Each video also saves a matching `.lrc` file next to it. To fix a wrong word or 
 
 ## Notes
 
+- If your ffmpeg can't draw subtitles (recent Homebrew builds leave out `libass`), the app draws the lyrics itself with Python. It looks the same, it's just a little slower. If you'd rather use ffmpeg for this, run `brew install ffmpeg-full`.
+
 - The vocal reduction is the classic "karaoke button" trick, not AI separation. It works well on most studio recordings. Vocals with lots of stereo reverb may still be faintly audible, and mono recordings can't be processed.
 - Command line use, without the browser:
   ```bash

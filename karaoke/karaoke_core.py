@@ -292,13 +292,85 @@ def ass_escape(s: str) -> str:
     return s.replace("\\", "/").replace("{", "(").replace("}", ")")
 
 
-def build_ass(lines: list[Line], artist: str, title: str, duration: float) -> str:
+LEAD = 3.0  # seconds a line is shown before it is sung
+
+
+@dataclass
+class Event:
+    """One thing on screen: a lyric line, title text or countdown dots."""
+    start: float
+    end: float
+    style: str            # Lyric | Title | Artist | Dots
+    x: int
+    y: int
+    text: str = ""
+    words: Optional[list[Word]] = None   # karaoke timing (Lyric only)
+    fade: tuple[float, float] = (0.0, 0.0)
+    dots: int = 0
+
+
+def layout(lines: list[Line], artist: str, title: str, duration: float) -> list[Event]:
+    ev: list[Event] = []
+    cx = WIDTH // 2
+    rows = (HEIGHT // 2 - 50, HEIGHT // 2 + 50)
+
+    def add(e: Event):
+        if e.end - e.start > 0.05:
+            ev.append(e)
+
+    def countdown(before: float):
+        for k in range(3):
+            s = before - 3.0 + k
+            add(Event(s, s + 1, "Dots", cx, rows[0] - 90, dots=3 - k))
+
+    # Title card before the singing starts
+    first = lines[0].start if lines else duration
+    title_end = min(max(first - LEAD - 0.3, 0), 8.0)
+    if title_end > 1.0:
+        add(Event(0, title_end, "Title", cx, HEIGHT // 2 - 30,
+                  text=title or "Karaoke", fade=(0.4, 0.4)))
+        if artist:
+            add(Event(0, title_end, "Artist", cx, HEIGHT // 2 + 40,
+                      text=artist, fade=(0.4, 0.4)))
+
+    if lines and lines[0].start > 4:
+        countdown(lines[0].start)
+
+    # Lyrics: two rows, alternating, upcoming line visible ahead of time.
+    shown_until = [0.0, 0.0]
+    for i, line in enumerate(lines):
+        row = i % 2
+        appear = max(line.start - LEAD, shown_until[row] + 0.05)
+        if i > 0:
+            appear = max(appear, lines[i - 1].start)  # not before previous starts
+        appear = min(appear, line.start)
+        gone = line.end + 0.6
+        if i + 1 < len(lines):
+            gone = min(max(gone, lines[i + 1].start + 0.4),
+                       lines[i + 1].start + 2.5, line.end + 2)
+            # the line two ahead re-uses this row; leave room for it
+            if i + 2 < len(lines):
+                gone = min(gone, max(line.end + 0.2, lines[i + 2].start - LEAD))
+        shown_until[row] = gone
+        add(Event(appear, gone, "Lyric", cx, rows[row], text=line.text,
+                  words=line.words, fade=(0.2, 0.25)))
+
+        # Countdown dots during long instrumental gaps
+        if i + 1 < len(lines) and lines[i + 1].start - line.end > 10:
+            countdown(lines[i + 1].start)
+    return ev
+
+
+# ---- libass (.ass subtitles) ------------------------------------------------
+
+
+def build_ass(events: list[Event]) -> str:
     # Colours are &HAABBGGRR. Karaoke: Secondary = not yet sung, Primary = sung.
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {WIDTH}
 PlayResY: {HEIGHT}
-WrapStyle: 0
+WrapStyle: 2
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
@@ -311,111 +383,268 @@ Style: Dots,Arial,64,&H0000D7FF,&H00FFFFFF,&H00301010,&H80000000,-1,0,0,0,100,10
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    ev: list[str] = []
-    cx = WIDTH // 2
-    rows = (HEIGHT // 2 - 50, HEIGHT // 2 + 50)
+    out = []
+    for e in events:
+        tags = r"{\pos(%d,%d)" % (e.x, e.y)
+        if any(e.fade):
+            tags += r"\fad(%d,%d)" % (e.fade[0] * 1000, e.fade[1] * 1000)
+        tags += "}"
+        if e.words:
+            parts = []
+            t = e.start
+            for w in e.words:
+                gap = int(round((w.start - t) * 100))
+                if gap > 0:
+                    parts.append(r"{\k%d}" % gap)
+                dur = max(1, int(round((w.end - max(w.start, t)) * 100)))
+                parts.append(r"{\kf%d}%s " % (dur, ass_escape(w.text)))
+                t = max(t, w.end)
+            body = "".join(parts).rstrip()
+        elif e.dots:
+            body = "  ".join("●" * e.dots)
+        else:
+            body = ass_escape(e.text)
+        out.append(f"Dialogue: 0,{ass_time(e.start)},{ass_time(e.end)},"
+                   f"{e.style},,0,0,0,,{tags}{body}")
+    return header + "\n".join(out) + "\n"
 
-    def add(start, end, style, text, layer=0):
-        if end - start > 0.05:
-            ev.append(f"Dialogue: {layer},{ass_time(start)},{ass_time(end)},"
-                      f"{style},,0,0,0,,{text}")
 
-    LEAD = 3.0  # seconds a line is shown before it is sung
-
-    # Title card before the singing starts
-    first = lines[0].start if lines else duration
-    title_end = min(max(first - LEAD - 0.3, 0), 8.0)
-    if title_end > 1.0:
-        fade = r"{\fad(400,400)}"
-        add(0, title_end, "Title",
-            fade + r"{\pos(%d,%d)}" % (cx, HEIGHT // 2 - 30) + ass_escape(title or "Karaoke"))
-        if artist:
-            add(0, title_end, "Artist",
-                fade + r"{\pos(%d,%d)}" % (cx, HEIGHT // 2 + 40) + ass_escape(artist))
-
-    # Lyrics: two rows, alternating, upcoming line visible ahead of time.
-    shown_until = [0.0, 0.0]
-    for i, line in enumerate(lines):
-        row = i % 2
-        appear = max(line.start - LEAD, shown_until[row] + 0.05)
-        if i > 0:
-            appear = max(appear, lines[i - 1].start - 0.0)  # not before previous starts
-        appear = min(appear, line.start)
-        gone = line.end + 0.6
-        if i + 1 < len(lines):
-            gone = min(max(gone, lines[i + 1].start + 0.4),
-                       lines[i + 1].start + 2.5, line.end + 2)
-            # the line two ahead re-uses this row; leave room for it
-            if i + 2 < len(lines):
-                gone = min(gone, max(line.end + 0.2, lines[i + 2].start - LEAD))
-        shown_until[row] = gone
-
-        parts = []
-        lead_cs = int(round((line.start - appear) * 100))
-        if lead_cs > 0:
-            parts.append(r"{\k%d}" % lead_cs)
-        t = line.start
-        for w in line.words:
-            gap = int(round((w.start - t) * 100))
-            if gap > 0:
-                parts.append(r"{\k%d}" % gap)
-            dur = max(1, int(round((w.end - max(w.start, t)) * 100)))
-            parts.append(r"{\kf%d}%s " % (dur, ass_escape(w.text)))
-            t = max(t, w.end)
-        text = r"{\pos(%d,%d)\fad(200,250)}" % (cx, rows[row]) + "".join(parts).rstrip()
-        add(appear, gone, "Lyric", text)
-
-        # Countdown dots during long instrumental gaps
-        nxt = lines[i + 1].start if i + 1 < len(lines) else None
-        if nxt and nxt - line.end > 10:
-            cd_start = nxt - 3.0
-            for k in range(3):
-                add(cd_start + k, cd_start + k + 1, "Dots",
-                    r"{\pos(%d,%d)}" % (cx, rows[0] - 90) + "  ".join("●" * (3 - k)))
-
-    # Countdown before the very first line, too
-    if lines and lines[0].start > 4:
-        cd_start = lines[0].start - 3.0
-        for k in range(3):
-            add(cd_start + k, cd_start + k + 1, "Dots",
-                r"{\pos(%d,%d)}" % (cx, rows[0] - 90) + "  ".join("●" * (3 - k)))
-
-    return header + "\n".join(ev) + "\n"
+def has_libass() -> bool:
+    try:
+        filters = run(["ffmpeg", "-hide_banner", "-filters"]).stdout
+    except RuntimeError:
+        return False
+    return bool(re.search(r"^\s*\S+\s+ass\s", filters, re.M))
 
 
 # -------------------------------------------------------------------------- video
 
+FPS = 25
 
-def render_video(backing: Path, ass: Path, out: Path, cover: Optional[Path],
-                 duration: float, log: Log) -> None:
+
+def render_video(events: list[Event], work_dir: Path, backing: Path, out: Path,
+                 cover: Optional[Path], duration: float, log: Log) -> None:
+    if has_libass():
+        try:
+            render_with_libass(events, work_dir, backing, out, cover, duration, log)
+            return
+        except RuntimeError as e:
+            log(f"Subtitle renderer failed, drawing lyrics another way ({e}).")
+    else:
+        log("This ffmpeg has no subtitle support (libass) - drawing lyrics "
+            "with Python instead.")
+    render_with_pillow(events, backing, out, cover, duration, log)
+
+
+def encode_args(backing: Path, duration: float, out: Path,
+                vf: Optional[str] = None) -> list[str]:
+    return ["-i", str(backing), "-map", "0:v", "-map", "1:a",
+            *(["-vf", vf] if vf else []),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-r", str(FPS),
+            "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{duration:.2f}", "-shortest",
+            "-movflags", "+faststart", str(out)]
+
+
+def render_with_libass(events, work_dir, backing, out, cover, duration, log):
     log("Rendering video...")
+    ass = work_dir / "lyrics.ass"
+    ass.write_text(build_ass(events), encoding="utf-8")
     # ffmpeg's filter-graph parser needs ':' '\' and quotes escaped in paths.
     ass_arg = str(ass).replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
     if cover:
-        video_in = ["-loop", "1", "-framerate", "25", "-i", str(cover)]
+        video_in = ["-loop", "1", "-framerate", str(FPS), "-i", str(cover)]
         vf = (f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
               f"crop={WIDTH}:{HEIGHT},boxblur=25:2,eq=brightness=-0.25:saturation=1.2,"
-              f"format=yuv420p,ass='{ass_arg}'")
+              f"format=yuv420p,ass=filename='{ass_arg}'")
     else:
-        video_in = ["-f", "lavfi", "-i",
-                    f"gradients=s={WIDTH}x{HEIGHT}:r=25:c0=0x1b0f3a:c1=0x0a3d62:"
-                    f"x0=0:y0=0:x1={WIDTH}:y1={HEIGHT}:speed=0.008"]
-        vf = f"format=yuv420p,ass='{ass_arg}'"
-    cmd = ["ffmpeg", "-y", *video_in, "-i", str(backing),
-           "-map", "0:v", "-map", "1:a", "-vf", vf,
-           "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage",
-           "-crf", "23", "-r", "25",
-           "-c:a", "aac", "-b:a", "192k",
-           "-t", f"{duration:.2f}", "-shortest",
-           "-movflags", "+faststart", str(out)]
+        video_in = ["-f", "lavfi", "-i", f"color=c=0x1b0f3a:s={WIDTH}x{HEIGHT}:r={FPS}"]
+        vf = f"format=yuv420p,ass=filename='{ass_arg}'"
+    run(["ffmpeg", "-y", *video_in, *encode_args(backing, duration, out, vf)])
+
+
+# ---- Pillow fallback: draw every frame in Python and pipe it to ffmpeg -------
+
+FONT_FILES = {
+    True: [  # bold
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/Library/Fonts/Arial Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Verdana Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "C:/Windows/Fonts/arialbd.ttf",
+    ],
+    False: [
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+    ],
+}
+GOLD = (255, 215, 0)
+WHITE = (255, 255, 255)
+OUTLINE = (16, 16, 48)
+
+
+def load_font(size: int, bold: bool):
+    from PIL import ImageFont
+    for path in FONT_FILES[bold] + FONT_FILES[not bold]:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default(size=size)
+
+
+def make_background(cover: Optional[Path]):
+    from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+    if cover:
+        try:
+            img = Image.open(cover).convert("RGB")
+            img = ImageOps.fit(img, (WIDTH, HEIGHT))
+            img = img.filter(ImageFilter.GaussianBlur(25))
+            return ImageEnhance.Brightness(img).enhance(0.7)
+        except Exception:
+            pass
+    # diagonal purple -> blue gradient
+    g = Image.new("RGB", (2, 2))
+    g.putdata([(27, 15, 58), (18, 38, 80), (18, 38, 80), (10, 61, 98)])
+    return g.resize((WIDTH, HEIGHT), Image.BILINEAR)
+
+
+class PillowEvent:
+    """Pre-renders an event once (white + gold versions) for fast compositing."""
+
+    def __init__(self, e: Event, fonts: dict):
+        from PIL import Image, ImageDraw
+        self.e = e
+        style = {"Lyric": (fonts["lyric"], WHITE, 4),
+                 "Title": (fonts["title"], WHITE, 4),
+                 "Artist": (fonts["artist"], (208, 208, 208), 3),
+                 "Dots": (fonts["lyric"], GOLD, 3)}[e.style]
+        font, color, stroke = style
+        self.spans: list[tuple[float, float, float, float]] = []
+        pad = stroke + 4
+
+        if e.dots:
+            r, gap = 14, 34
+            w = e.dots * 2 * r + (e.dots - 1) * gap + 2 * pad
+            h = 2 * r + 2 * pad
+            self.base = Image.new("RGBA", (w, h))
+            d = ImageDraw.Draw(self.base)
+            for k in range(e.dots):
+                x = pad + k * (2 * r + gap)
+                d.ellipse((x, pad, x + 2 * r, pad + 2 * r), fill=GOLD,
+                          outline=OUTLINE, width=3)
+            self.gold = None
+        else:
+            text = e.text
+            # shrink long lines so they fit on screen
+            while font.getlength(text) > WIDTH - 80 and font.size > 24:
+                font = load_font(font.size - 4, True)
+            tw = int(font.getlength(text))
+            asc, desc = font.getmetrics()
+            w, h = tw + 2 * pad + 3, asc + desc + 2 * pad + 3
+            self.base = self._draw(text, font, color, stroke, pad, (w, h))
+            self.gold = None
+            if e.words:
+                self.gold = self._draw(text, font, GOLD, stroke, pad, (w, h))
+                for i, word in enumerate(e.words):
+                    x0 = font.getlength(" ".join(ww.text for ww in e.words[:i])
+                                        + (" " if i else ""))
+                    x1 = x0 + font.getlength(word.text)
+                    self.spans.append((word.start, word.end, pad + x0, pad + x1))
+        self.pos = (e.x - self.base.width // 2, e.y - self.base.height // 2)
+
+    @staticmethod
+    def _draw(text, font, color, stroke, pad, size):
+        from PIL import Image, ImageDraw
+        img = Image.new("RGBA", size)
+        d = ImageDraw.Draw(img)
+        d.text((pad + 2, pad + 3), text, font=font, fill=(0, 0, 0, 110),
+               stroke_width=stroke, stroke_fill=(0, 0, 0, 110))
+        d.text((pad, pad), text, font=font, fill=color,
+               stroke_width=stroke, stroke_fill=OUTLINE)
+        return img
+
+    def sung_px(self, t: float) -> int:
+        """How many pixels of the line are highlighted at time t."""
+        px = 0.0
+        for ws, we, x0, x1 in self.spans:
+            if t >= we:
+                px = x1
+            elif t > ws:
+                px = x0 + (x1 - x0) * (t - ws) / max(we - ws, 0.01)
+                break
+            else:
+                break
+        if self.spans and px >= self.spans[-1][3]:
+            px = self.base.width  # include the outline after the last letter
+        return int(px)
+
+    def alpha(self, t: float) -> float:
+        fi, fo = self.e.fade
+        a = 1.0
+        if fi and t < self.e.start + fi:
+            a = (t - self.e.start) / fi
+        if fo and t > self.e.end - fo:
+            a = min(a, (self.e.end - t) / fo)
+        return max(0.0, min(1.0, a))
+
+
+def render_with_pillow(events, backing, out, cover, duration, log):
     try:
-        run(cmd)
-    except RuntimeError:
-        if cover:
-            raise
-        # Older ffmpeg without the 'gradients' source: plain colour background.
-        cmd[cmd.index("-i") + 1] = f"color=c=0x1b0f3a:s={WIDTH}x{HEIGHT}:r=25"
-        run(cmd)
+        from PIL import Image
+    except ImportError:
+        raise RuntimeError(
+            "Your ffmpeg can't draw subtitles and Pillow isn't installed. Fix with "
+            "either:  brew install ffmpeg-full   or   .venv/bin/pip install pillow")
+
+    fonts = {"lyric": load_font(58, True), "title": load_font(72, True),
+             "artist": load_font(44, False)}
+    bg = make_background(cover)
+    items = [PillowEvent(e, fonts) for e in events]
+    items.sort(key=lambda p: p.e.start)
+
+    cmd = ["ffmpeg", "-y", "-loglevel", "error",
+           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{WIDTH}x{HEIGHT}",
+           "-r", str(FPS), "-i", "-", *encode_args(backing, duration, out)]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    total = int(duration * FPS) + 1
+    last_key, last_bytes, next_pct = None, None, 10
+    log("Rendering video... 0%")
+    try:
+        for n in range(total):
+            t = n / FPS
+            active = [p for p in items if p.e.start <= t < p.e.end]
+            state = []
+            for p in active:
+                a = round(p.alpha(t), 2)
+                sung = p.sung_px(t) if p.gold is not None else 0
+                state.append((id(p), a, sung))
+            key = tuple(state)
+            if key != last_key:
+                frame = bg.copy()
+                for p, (_, a, sung) in zip(active, state):
+                    layer = p.base
+                    if sung > 0:
+                        layer = layer.copy()
+                        layer.paste(p.gold.crop((0, 0, sung, layer.height)), (0, 0))
+                    if a < 1.0:
+                        layer = layer.copy()
+                        layer.putalpha(layer.getchannel("A").point(
+                            lambda v, a=a: int(v * a)))
+                    frame.paste(layer, p.pos, layer)
+                last_bytes, last_key = frame.tobytes(), key
+            proc.stdin.write(last_bytes)
+            if n * 100 // total >= next_pct:
+                log(f"Rendering video... {next_pct}%")
+                next_pct += 10
+        proc.stdin.close()
+    except BrokenPipeError:
+        pass
+    err = proc.stderr.read().decode("utf-8", "replace")
+    if proc.wait() != 0:
+        raise RuntimeError("ffmpeg failed:\n" + "\n".join(err.strip().splitlines()[-15:]))
 
 
 # --------------------------------------------------------------------------- main
@@ -478,13 +707,12 @@ def make_karaoke(
     backing = work_dir / "backing.wav"
     make_backing_track(mp3, backing, strength, info["channels"] >= 2, log)
 
-    # Subtitles + video
-    ass = work_dir / "lyrics.ass"
-    ass.write_text(build_ass(lines, artist, title, duration), encoding="utf-8")
+    # Lyrics overlay + video
+    events = layout(lines, artist, title, duration)
     safe = re.sub(r"[^\w\- ]+", "", f"{artist} - {title}" if artist else title)
     safe = re.sub(r"\s+", " ", safe).strip() or "karaoke"
     out = out_dir / f"{safe} (Karaoke).mp4"
-    render_video(backing, ass, out, cover, duration, log)
+    render_video(events, work_dir, backing, out, cover, duration, log)
     # Keep the timed lyrics next to the video so they can be fixed and re-used.
     out.with_suffix(".lrc").write_text(to_lrc(lines), encoding="utf-8")
     log(f"Done! Saved to {out}")
