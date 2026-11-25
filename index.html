@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
-<title>Jeopardy!</title>
+<title>Huy's Birthday Bash</title>
 <style>
   :root {
     --bg1:#1b1646; --bg2:#2a1b6e; --ink:#fff; --soft:#ffffff1f; --dark:#1a1240;
@@ -39,6 +39,8 @@
     background:linear-gradient(90deg,var(--c2),var(--c1),var(--c6),var(--c5),var(--c4));
     -webkit-background-clip:text; background-clip:text; color:transparent; }
   header .sp { flex:1; }
+  body.display header { justify-content:center; padding-top:18px; }
+  body.display header h1 { font-size:clamp(34px,4.2vw,64px); }
 
   /* Board */
   #boardWrap { flex:1; padding:10px 22px; min-height:0; display:flex; }
@@ -93,7 +95,7 @@
   #hostAnswer { text-align:center; color:#a8ffdf; font-size:16px; padding:8px 18px; background:#00000040; }
   #hostAnswer:empty { display:none; }
 
-  body.display header, body.display .adj, body.display #clueActions, body.display #hostAnswer { display:none !important; }
+  body.display header .btn, body.display header .sp, body.display .adj, body.display #clueActions, body.display #hostAnswer { display:none !important; }
   body.display .tile, body.display .team .name { cursor:default; }
   body.display .tile:hover:not(.used) { transform:none; filter:none; }
   body.display #board:empty::after { content:"Waiting for host…"; font-size:32px; opacity:.6; grid-column:1/-1; align-self:center; text-align:center; font-family:var(--display); }
@@ -120,7 +122,7 @@
 <body>
 <div id="app">
   <header>
-    <h1>JEOPARDY!</h1>
+    <h1>🎉 Huy's Birthday Bash 🎈</h1>
     <span class="sp"></span>
     <button class="btn gold" id="btnTV" title="Open the audience view in a second window for your TV">📺 TV Display</button>
     <button class="btn" id="btnFinal">Final Jeopardy</button>
@@ -440,7 +442,7 @@ document.addEventListener("keydown",e=>{
 });
 
 if(DISPLAY){
-  document.body.classList.add("display"); document.title="Jeopardy! — TV";
+  document.body.classList.add("display"); document.title="Huy's Birthday Bash — TV";
   const h=$("fsHint"); h.classList.remove("hidden");
   const fs=()=>{ if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{}); else document.exitFullscreen(); };
   document.addEventListener("click",fs); document.addEventListener("keydown",e=>{ if(e.key==="f"||e.key==="F") fs(); });
