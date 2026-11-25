@@ -9,6 +9,10 @@ word matching and a penalty for matching words that are far apart in time), then
     intro),
   * gives every matched lyric word Whisper's start/end,
   * fills in the unmatched words between their matched neighbours.
+
+It also handles one lyric word heard as two ("Sonnenschein" / "Sonnen schein")
+and two lyric words heard as one ("gonna" / "going to"), and folds umlauts and
+accents so "für" == "fuer".
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from __future__ import annotations
 import difflib
 import re
 import statistics
+import unicodedata
 from typing import Callable, Optional
 
 from karaoke_core import Line, Word, spread_words
@@ -24,17 +29,77 @@ Log = Callable[[str], None]
 
 GAP = -0.45          # cost of skipping a lyric word or a heard word
 MISMATCH = -0.9      # cost of pairing two different words
+MERGE = -0.3         # extra cost for a 2:1 / 1:2 match
 MIN_SIM = 0.62       # how similar two words must be to count as a match
 
+FOLD = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss", "æ": "ae",
+                      "ø": "o", "œ": "oe", "’": "'", "‘": "'", "`": "'"})
+EN_SLANG = {"em": "them", "cause": "because", "cos": "because", "til": "until",
+            "ya": "you", "gonna": "going", "wanna": "want", "gotta": "got"}
 
-def norm(w: str) -> str:
-    w = w.lower().replace("’", "'")
-    w = re.sub(r"[^\w']", "", w)
-    w = w.replace("'", "")
-    # sung contractions: "tryin" == "trying", "em" == "them"
-    w = re.sub(r"in$", "ing", w) if w.endswith("in") and len(w) > 4 else w
-    return {"em": "them", "cause": "because", "cos": "because", "til": "until",
-            "ya": "you", "gonna": "going", "wanna": "want"}.get(w, w)
+
+def norm(w: str, lang: Optional[str] = None) -> str:
+    w = w.casefold().translate(FOLD)
+    w = "".join(c for c in unicodedata.normalize("NFKD", w)
+                if not unicodedata.combining(c))
+    w = re.sub(r"[^\w]", "", w)
+    if lang in (None, "en"):
+        # sung contractions: "tryin'" == "trying", "em" == "them"
+        if w.endswith("in") and len(w) > 4:
+            w += "g"
+        w = EN_SLANG.get(w, w)
+    return w
+
+
+# ---------------------------------------------------------------- language guess
+
+STOPWORDS = {
+    "en": "the and you i to a my me it in is that of your we be for on all so this love",
+    "de": "ich und die der du nicht das ist es in mir mich zu ein sie wir den mit auf "
+          "was dich so wie dann nur noch bin mein kein",
+    "es": "que de la el y no me te en mi tu lo es un una por yo se con como amor",
+    "fr": "je le la de et tu les pas que un une moi est des pour mon dans ne qui toi",
+    "it": "di che e il la non mi ti un per una sei io è come ma sono tu amore",
+    "pt": "que de e o a não eu me te um uma você meu minha com é se do da",
+    "nl": "ik je de het een en niet is van dat in mijn wat jij me op ze",
+    "sv": "jag och du det att en är inte på som mig med har vi min",
+    "pl": "nie i się w to na że mnie ja jak ty mi co jest",
+    "tr": "bir ve bu ben sen ne da de mi için gibi çok beni seni",
+}
+STOPWORDS = {k: set(v.split()) for k, v in STOPWORDS.items()}
+
+
+def guess_language(text: str) -> Optional[str]:
+    words = re.findall(r"[^\W\d_]+", text.casefold())
+    if len(words) < 15:
+        return None
+    scores = {lang: sum(w in sw for w in words) for lang, sw in STOPWORDS.items()}
+    best = max(scores, key=scores.get)
+    ranked = sorted(scores.values(), reverse=True)
+    if ranked[0] >= max(5, 0.08 * len(words)) and ranked[0] > 1.3 * ranked[1]:
+        return best
+    return None
+
+
+def lyric_hints(lines: list[Line], max_chars: int = 500) -> str:
+    """Distinct lyric words in order: hints that steer Whisper towards the real
+    lyrics (applied to every 30 s window it listens to)."""
+    seen, out, n = set(), [], 0
+    for l in lines:
+        for w in l.words:
+            t = re.sub(r"^[^\w]+|[^\w']+$", "", w.text)
+            k = t.casefold()
+            if len(k) < 2 or k in seen:
+                continue
+            seen.add(k)
+            out.append(t)
+            n += len(t) + 1
+            if n > max_chars:
+                return " ".join(out)
+    return " ".join(out)
+
+
+# --------------------------------------------------------------------- alignment
 
 
 class _Sim:
@@ -44,70 +109,110 @@ class _Sim:
     def __call__(self, a: str, b: str) -> float:
         if a == b:
             return 1.0 if a else 0.0
+        la, lb = len(a), len(b)
+        if not la or not lb or min(la, lb) * 2.2 < max(la, lb):
+            return 0.0  # too different in length to ever be a match
         key = (a, b)
-        if key not in self.cache:
-            self.cache[key] = difflib.SequenceMatcher(None, a, b).ratio()
-        return self.cache[key]
+        v = self.cache.get(key)
+        if v is None:
+            v = self.cache[key] = difflib.SequenceMatcher(None, a, b).ratio()
+        return v
 
 
-def _align(lyr: list[tuple[str, float, float]], heard: list[tuple[str, float]],
-           slack: float, per_sec: float, hard: Optional[float]) -> list[tuple[int, int, float]]:
+def _align(lyr: list[tuple[str, float, float]], heard: list[tuple[str, float, float]],
+           slack: float, per_sec: float, hard: Optional[float]
+           ) -> dict[int, tuple[float, float]]:
     """Global alignment. lyr = (norm word, window start, window end),
-    heard = (norm word, time). Returns matched (lyric idx, heard idx, similarity)."""
+    heard = (norm word, start, end). Returns {lyric index: (start, end)}."""
     sim = _Sim()
     n, m = len(lyr), len(heard)
     NEG = float("-inf")
-    prev = [j * GAP for j in range(m + 1)]
-    back = [bytearray(m + 1) for _ in range(n + 1)]  # 0 diag, 1 up, 2 left
-    for j in range(1, m + 1):
-        back[0][j] = 2
+
+    def dist(w0, w1, ht):
+        if ht < w0 - slack:
+            return w0 - slack - ht
+        if ht > w1 + slack:
+            return ht - w1 - slack
+        return 0.0
+
+    rows = [[j * GAP for j in range(m + 1)]]
+    back = [bytearray([2] * (m + 1))]   # 0 1:1, 1 skip lyric, 2 skip heard,
+    back[0][0] = 0                      # 3 lyric<->2 heard, 4 2 lyric<->heard
     for i in range(1, n + 1):
         word, w0, w1 = lyr[i - 1]
+        prev = rows[i - 1]
+        prev2 = rows[i - 2] if i >= 2 else None
         cur = [NEG] * (m + 1)
         cur[0] = i * GAP
-        back[i][0] = 1
-        row = back[i]
+        row = bytearray(m + 1)
+        row[0] = 1
         for j in range(1, m + 1):
-            hw, ht = heard[j - 1]
-            # distance in seconds from the window where this lyric word should be
-            d = (w0 - slack - ht) if ht < w0 - slack else (ht - w1 - slack) if ht > w1 + slack else 0.0
+            hw, ht, _ = heard[j - 1]
+            d = dist(w0, w1, ht)
             if hard is not None and d > hard:
                 s = MISMATCH * 2
+                far = True
             else:
                 sv = sim(word, hw)
                 s = (2.0 * sv if sv >= MIN_SIM else MISMATCH) - per_sec * d
+                far = False
             best, arrow = prev[j - 1] + s, 0
-            up = prev[j] + GAP
-            if up > best:
-                best, arrow = up, 1
-            left = cur[j - 1] + GAP
-            if left > best:
-                best, arrow = left, 2
+            v = prev[j] + GAP
+            if v > best:
+                best, arrow = v, 1
+            v = cur[j - 1] + GAP
+            if v > best:
+                best, arrow = v, 2
+            if not far and j >= 2:  # one lyric word heard as two
+                sv = sim(word, heard[j - 2][0] + hw)
+                if sv >= MIN_SIM + 0.08:
+                    v = prev[j - 2] + 2.0 * sv + MERGE - per_sec * dist(w0, w1, heard[j - 2][1])
+                    if v > best:
+                        best, arrow = v, 3
+            if not far and prev2 is not None:  # two lyric words heard as one
+                pw, pw0, _ = lyr[i - 2]
+                sv = sim(pw + word, hw)
+                if sv >= MIN_SIM + 0.08:
+                    v = prev2[j - 1] + 2.0 * sv + MERGE - per_sec * dist(pw0, w1, ht)
+                    if v > best:
+                        best, arrow = v, 4
             cur[j] = best
             row[j] = arrow
-        prev = cur
+        rows.append(cur)
+        back.append(row)
+        if i >= 3:
+            rows[i - 3] = None  # free memory; only two rows back are needed
 
-    pairs = []
+    def ok(k, ht):
+        if hard is None:
+            return True
+        _, w0, w1 = lyr[k]
+        return w0 - slack - hard <= ht <= w1 + slack + hard
+
+    spans: dict[int, tuple[float, float]] = {}
     i, j = n, m
     while i > 0 and j > 0:
         a = back[i][j]
         if a == 0:
-            sv = sim(lyr[i - 1][0], heard[j - 1][0])
-            if sv >= MIN_SIM:
-                d_ok = True
-                if hard is not None:
-                    _, w0, w1 = lyr[i - 1]
-                    ht = heard[j - 1][1]
-                    d_ok = w0 - slack - hard <= ht <= w1 + slack + hard
-                if d_ok:
-                    pairs.append((i - 1, j - 1, sv))
+            hw, hs, he = heard[j - 1]
+            if sim(lyr[i - 1][0], hw) >= MIN_SIM and ok(i - 1, hs):
+                spans[i - 1] = (hs, he)
             i, j = i - 1, j - 1
         elif a == 1:
             i -= 1
-        else:
+        elif a == 2:
             j -= 1
-    pairs.reverse()
-    return pairs
+        elif a == 3:
+            spans[i - 1] = (heard[j - 2][1], heard[j - 1][2])
+            i, j = i - 1, j - 2
+        else:  # a == 4: split the heard word's time by letter count
+            _, hs, he = heard[j - 1]
+            l1, l2 = len(lyr[i - 2][0]) or 1, len(lyr[i - 1][0]) or 1
+            mid = hs + (he - hs) * l1 / (l1 + l2)
+            spans[i - 2] = (hs, mid)
+            spans[i - 1] = (mid, he)
+            i, j = i - 2, j - 1
+    return spans
 
 
 def shift_lines(lines: list[Line], dt: float) -> list[Line]:
@@ -117,10 +222,14 @@ def shift_lines(lines: list[Line], dt: float) -> list[Line]:
             for l in lines]
 
 
-def align_lines(lines: list[Line], heard_words: list[Word], log: Log = print) -> list[Line]:
-    """Return new lines whose word timings follow `heard_words` where possible."""
+def align_lines(lines: list[Line], heard_words: list[Word], log: Log = print,
+                lang: Optional[str] = None, stats: Optional[dict] = None) -> list[Line]:
+    """Return new lines whose word timings follow `heard_words` where possible.
+    If `stats` is given, stats["matched"] is set to the fraction of lyric words
+    that were heard."""
     flat = [(li, wi) for li, l in enumerate(lines) for wi in range(len(l.words))]
-    heard = [(norm(w.text), w.start) for w in heard_words]
+    heard = [(norm(w.text, lang), w.start, w.end) for w in heard_words]
+    heard = [h for h in heard if h[0]]
     if not flat or not heard:
         return lines
 
@@ -129,15 +238,15 @@ def align_lines(lines: list[Line], heard_words: list[Word], log: Log = print) ->
         out = []
         for li, wi in flat:
             l = ls[li]
-            out.append((norm(l.words[wi].text), l.start, max(l.end, l.start + 0.5)))
+            out.append((norm(l.words[wi].text, lang), l.start, max(l.end, l.start + 0.5)))
         return out
 
     # Pass 1: loose time constraint -> find a global offset
-    pairs = _align(lyric_seq(lines), heard, slack=2.0, per_sec=0.05, hard=None)
+    spans = _align(lyric_seq(lines), heard, slack=2.0, per_sec=0.05, hard=None)
     diffs = []
-    for k, j, _ in pairs:
+    for k, (hs, _) in spans.items():
         li, wi = flat[k]
-        diffs.append(heard_words[j].start - lines[li].words[wi].start)
+        diffs.append(hs - lines[li].words[wi].start)
     offset = 0.0
     if len(diffs) >= 8:
         med = statistics.median(diffs)
@@ -149,13 +258,13 @@ def align_lines(lines: list[Line], heard_words: list[Word], log: Log = print) ->
     work = shift_lines(lines, offset) if offset else lines
 
     # Pass 2: tight time constraint around the (corrected) line times
-    pairs = _align(lyric_seq(work), heard, slack=1.0, per_sec=0.35, hard=4.0)
-    anchor: dict[tuple[int, int], Word] = {}
-    for k, j, _ in pairs:
-        anchor[flat[k]] = heard_words[j]
+    spans = _align(lyric_seq(work), heard, slack=1.0, per_sec=0.35, hard=4.0)
+    anchor = {flat[k]: v for k, v in spans.items()}
     total = len(flat)
-    log(f"Matched {len(anchor)} of {total} lyric words to the singing "
-        f"({100 * len(anchor) // max(total, 1)}%).")
+    pct = 100 * len(anchor) // max(total, 1)
+    log(f"Matched {len(anchor)} of {total} lyric words to the singing ({pct}%).")
+    if stats is not None:
+        stats["matched"] = len(anchor) / max(total, 1)
 
     out: list[Line] = []
     for li, line in enumerate(work):
@@ -171,8 +280,8 @@ def _retime_line(line: Line, li: int, anchor: dict, nxt_start: float) -> Line:
         return line  # nothing heard: keep the LRC estimate
     times: list[Optional[tuple[float, float]]] = [None] * len(words)
     for wi in idx:
-        h = anchor[(li, wi)]
-        times[wi] = (h.start, min(h.end, h.start + 4.0))
+        s, e = anchor[(li, wi)]
+        times[wi] = (s, min(max(e, s + 0.05), s + 4.0))
 
     def fill(a: int, b: int, t0: float, t1: float):
         """Spread words[a:b] across t0..t1."""
@@ -219,5 +328,6 @@ def _tidy(lines: list[Line]) -> list[Line]:
             nxt = lines[li + 1].words[0].start
             if line.end > nxt:
                 line.end = max(nxt, line.start + 0.1)
-                line.words[-1].end = min(line.words[-1].end, max(nxt, line.words[-1].start + 0.05))
+                line.words[-1].end = min(line.words[-1].end,
+                                         max(nxt, line.words[-1].start + 0.05))
     return lines

@@ -17,7 +17,7 @@ from flask import Flask, abort, jsonify, request, send_file
 from karaoke_core import make_karaoke
 
 HERE = Path(__file__).resolve().parent
-VERSION = "1.4 (precise word timing)"
+VERSION = "1.5 (better non-English sync)"
 PORT = int(os.environ.get("KARAOKE_PORT", "5123"))
 
 

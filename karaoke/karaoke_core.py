@@ -238,8 +238,9 @@ def fetch_lrclib(artist: str, title: str, duration: float, log: Log) -> Optional
     return None
 
 
-def whisper_cache_path(mp3: Path, model_name: str, language: Optional[str]) -> Path:
-    h = hashlib.sha1()
+def whisper_cache_path(mp3: Path, model_name: str, language: Optional[str],
+                       hints: Optional[str] = None) -> Path:
+    h = hashlib.sha1((hints or "").encode())
     with open(mp3, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
@@ -248,11 +249,11 @@ def whisper_cache_path(mp3: Path, model_name: str, language: Optional[str]) -> P
 
 
 def run_whisper(mp3: Path, model_name: str, language: Optional[str],
-                log: Log) -> list[list[Word]]:
+                log: Log, hints: Optional[str] = None) -> list[list[Word]]:
     """Transcribe with word timestamps. Returns Whisper's segments as word lists.
     Results are cached per song, so re-rendering (e.g. with a different
     offset) is quick."""
-    cache = whisper_cache_path(mp3, model_name, language)
+    cache = whisper_cache_path(mp3, model_name, language, hints)
     if cache.exists():
         try:
             data = json.loads(cache.read_text())
@@ -270,11 +271,14 @@ def run_whisper(mp3: Path, model_name: str, language: Optional[str],
     log(f"Listening to the vocals with Whisper ({model_name}). The first run "
         "downloads the model; this can take a few minutes...")
     model = WhisperModel(model_name, device="auto", compute_type="auto")
-    segments, info = model.transcribe(
-        str(mp3), word_timestamps=True, language=language or None,
-        vad_filter=False, condition_on_previous_text=False, beam_size=5,
-    )
-    log(f"Detected language: {info.language}")
+    opts = dict(word_timestamps=True, language=language or None,
+                vad_filter=False, condition_on_previous_text=False, beam_size=5)
+    try:
+        segments, info = model.transcribe(str(mp3), hotwords=hints or None, **opts)
+    except TypeError:  # older faster-whisper without hotwords
+        segments, info = model.transcribe(str(mp3), **opts)
+    if not language:
+        log(f"Detected language: {info.language}")
     out: list[list[Word]] = []
     for seg in segments:
         words = [Word(w.word.strip(), w.start, w.end)
@@ -289,6 +293,16 @@ def run_whisper(mp3: Path, model_name: str, language: Optional[str],
     except OSError:
         pass
     return out
+
+
+def isolate_vocals(src: Path, dst: Path) -> None:
+    """Rough vocal track for Whisper: keep what's in the centre of the stereo
+    image (ffmpeg's spectral upmixer puts that in the front-centre channel),
+    band-limit it to the voice range and even out the loudness."""
+    run(["ffmpeg", "-y", "-i", str(src), "-af",
+         "surround=chl_out=3.0:chl_in=stereo,pan=mono|c0=FC,"
+         "highpass=f=120,lowpass=f=7500,dynaudnorm=f=200",
+         "-ar", "16000", str(dst)])
 
 
 def segments_to_lines(segments: list[list[Word]]) -> list[Line]:
@@ -741,11 +755,39 @@ def make_karaoke(
         lines = segments_to_lines(run_whisper(mp3, whisper_model, language, log))
     elif lines and precise and not has_word_timing(lines):
         try:
-            from align import align_lines
-            heard = [w for seg in run_whisper(mp3, whisper_model, language, log)
-                     for w in seg]
-            log("Syncing every word to the singing...")
-            lines = align_lines(lines, heard, log)
+            from align import align_lines, guess_language, lyric_hints
+            lang = language or guess_language(" ".join(l.text for l in lines))
+            if lang and not language:
+                log(f"Lyrics look like language '{lang}' - telling Whisper.")
+            hints = lyric_hints(lines)
+
+            def attempt(audio: Path) -> tuple[list[Line], float]:
+                heard = [w for seg in run_whisper(audio, whisper_model, lang, log,
+                                                  hints=hints) for w in seg]
+                log("Syncing every word to the singing...")
+                st: dict = {}
+                return align_lines(lines, heard, log, lang=lang, stats=st), \
+                    st.get("matched", 0.0)
+
+            best, score = attempt(mp3)
+            if score < 0.6 and info["channels"] >= 2:
+                log("The singer is hard to hear - listening again with the "
+                    "vocals isolated...")
+                vocals = work_dir / "vocals.wav"
+                try:
+                    isolate_vocals(mp3, vocals)
+                    alt, alt_score = attempt(vocals)
+                    if alt_score > score:
+                        best, score = alt, alt_score
+                        log("The isolated vocals worked better - using those.")
+                    else:
+                        log("No improvement - keeping the first result.")
+                except RuntimeError as e:
+                    log(f"Vocal isolation not available ({e.args[0][:80]}).")
+            if score < 0.4:
+                log("Many words couldn't be heard clearly, so their timing is "
+                    "estimated. 'Better (medium)' under More options may help.")
+            lines = best
         except Exception as e:  # never lose the video over this
             log(f"Precise timing skipped ({e}). Using line timing only.")
     if lines and offset:

@@ -31,6 +31,12 @@ In **Auto** mode it tries these in order:
 ### Precise word timing (on by default)
 Online lyrics only say when each *line* starts. With **Precise word timing** checked, Whisper also listens to the song, and every lyric word is matched to the moment it's actually sung. If the online lyrics were timed for a different edit of the song (say, a longer intro), it also notices that and shifts all the lyrics to match. Whisper's results are saved per song in `~/.cache/karaoke-maker`, so rendering the same song again is quick.
 
+For songs that aren't in English, and for singers who are hard to understand:
+- The language is read from the lyrics and given to Whisper, along with the song's words as hints.
+- Umlauts and spelling variants count as the same word ("für" = "fuer"), and so do compound words heard as two ("Sonnenschein" = "Sonnen schein").
+- If less than 60% of the words are recognised, the app pulls the vocals out of the centre of the mix, listens again, and keeps whichever result is better.
+- If it's still poor, choose **Better (medium)** under *More options*.
+
 If everything is a little early or late, use the **Timing nudge** slider and render again.
 
 Each video also saves a matching `.lrc` file next to it, with a time for every word. To fix a wrong word or timing, edit that file in TextEdit, upload it under **More options → Own lyrics file**, and render again.
